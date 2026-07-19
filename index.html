@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#161826">
+<title>Kortz Center Loot Calculator</title>
+<style>
+  :root { --bg:#161826; --card:#232532; --line:rgba(233,233,237,0.16); --line-soft:rgba(233,233,237,0.08);
+          --text:#e9e9ed; --muted:rgba(233,233,237,0.6); --muted2:rgba(233,233,237,0.5); --accent:#9184d9; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; }
+  body { background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased;
+         font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  input[type=range] { accent-color:var(--accent); height:22px; }
+  input[type=checkbox],input[type=radio] { accent-color:var(--accent); width:17px; height:17px; }
+  select { appearance:none; -webkit-appearance:none; }
+  button { font-family:inherit; }
+  .app { max-width:560px; margin:0 auto; min-height:100vh; background:var(--bg); display:flex; flex-direction:column; }
+  .head { position:sticky; top:0; z-index:10; background:var(--card); padding:10px 14px;
+          padding-top:calc(10px + env(safe-area-inset-top)); display:flex; flex-direction:column; gap:6px;
+          border-bottom:1px solid var(--line); }
+  .row-between { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .title { font-weight:500; font-size:16px; letter-spacing:-0.01em; }
+  .reset { flex:none; min-height:36px; padding:0 12px; border-radius:8px; border:1px solid var(--line);
+           background:transparent; color:var(--text); font-size:12px; cursor:pointer; }
+  .players-label { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); }
+  select.players, select.item, select.buyer { color:var(--text); background:var(--bg); border:1px solid var(--line); }
+  select.players { flex:1; min-height:38px; padding:4px 10px; font-size:13px; border-radius:8px; }
+  .tabs { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .tab { flex:1; min-height:40px; padding:6px 10px; font-size:13px; border:none; cursor:pointer;
+         background:transparent; color:var(--text); }
+  .tab.right { border-left:1px solid var(--line); }
+  .tab.active { background:var(--bg); color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+  .body { flex:1; padding:12px; padding-bottom:calc(12px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:8px; }
+  .hint { font-size:11px; color:var(--muted2); }
+  .card { background:var(--card); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px; }
+  .sec-toggle { all:unset; cursor:pointer; display:flex; align-items:center; justify-content:space-between; min-height:34px; }
+  .sec-label { font-weight:500; font-size:14px; }
+  .sec-chevron { font-size:11px; color:var(--muted2); }
+  .sec-note { font-size:11px; color:var(--muted2); }
+  .placement { display:flex; flex-direction:column; gap:6px; padding:6px 0; border-bottom:1px solid var(--line-soft); }
+  .placement:last-child { border-bottom:none; }
+  .pl-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .pl-title { font-size:12.5px; font-weight:500; }
+  .pl-pct { font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:var(--accent); margin-left:6px; }
+  .pl-check { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--muted); min-height:30px; cursor:pointer; flex:none; }
+  .pl-remove { all:unset; cursor:pointer; font-size:11px; color:var(--muted2); min-height:30px; padding:0 4px; }
+  select.item { width:100%; min-height:40px; padding:4px 8px; font-size:12.5px; border-radius:7px; }
+  .slider-row { display:flex; align-items:center; gap:10px; min-height:38px; }
+  .slider-row input[type=range] { flex:1; }
+  .slider-val { flex:none; width:64px; text-align:right; font-size:12.5px; font-variant-numeric:tabular-nums; }
+  .buyer-label { display:flex; align-items:center; gap:6px; font-size:11.5px; color:rgba(233,233,237,0.75); min-height:28px; cursor:pointer; }
+  .buyer-pick { display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--muted); margin-left:22px; }
+  select.buyer { min-height:32px; padding:3px 6px; font-size:11.5px; border-radius:6px; }
+  .add-deposit { all:unset; cursor:pointer; font-size:12px; color:var(--accent); min-height:32px; }
+  .note-box { font-size:11px; line-height:1.4; color:var(--muted); background:var(--card); border-radius:8px; padding:8px 10px; }
+  .p-head { display:flex; align-items:center; justify-content:space-between; }
+  .p-name { font-weight:500; font-size:15px; }
+  .p-meta { font-size:11.5px; color:var(--muted); }
+  .bar { height:7px; border-radius:4px; background:var(--bg); overflow:hidden; }
+  .bar-fill { height:100%; background:var(--accent); border-radius:4px; }
+  .res-row { display:flex; flex-direction:column; padding:4px 0; border-bottom:1px solid var(--line-soft); }
+  .res-line { display:flex; justify-content:space-between; font-size:12.5px; }
+  .res-sub { font-size:10.5px; color:var(--muted2); }
+  .bag-total { display:flex; justify-content:space-between; align-items:baseline; padding-top:6px; border-top:1px solid var(--line); }
+  .bag-total-label { font-size:11.5px; color:var(--muted); }
+  .bag-total-val { font-weight:600; font-size:18px; }
+  .bonus-box { font-size:12px; color:#d2cefd; background:#2b2741; border-radius:8px; padding:8px 10px; }
+  .grand { background:#262a60; border-radius:8px; padding:12px; display:flex; justify-content:space-between; align-items:center; }
+  .grand-label { font-size:12.5px; }
+  .grand-val { font-weight:600; font-size:20px; color:#f5f4ff; }
+  .empty-msg { font-size:11.5px; color:var(--muted2); }
+  .footer { text-align:center; font-size:10px; color:var(--muted2); padding:14px 12px 20px; }
+  .footer a { color:var(--accent); text-decoration:none; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="head">
+    <div class="row-between">
+      <div class="title">Kortz Center Loot Calculator</div>
+      <button class="reset" id="resetBtn">Reset</button>
+    </div>
+    <label class="players-label">Players
+      <select class="players" id="playerSelect">
+        <option value="1">1 - Solo</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+      </select>
+    </label>
+    <div class="tabs">
+      <button class="tab" id="tabItems"></button>
+      <button class="tab right" id="tabResults">Results</button>
+    </div>
+  </div>
+  <div class="body" id="body"></div>
+  <div class="footer">
+    GTA Online - The Kortz Center Heist. Bag %s &amp; value ranges are community estimates; drag sliders to match your scouted run.
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------------- Loot data (from Kortz loot master) ---------------- */
+const LOOT_DATA = {
+  categories: [
+    { categoryId: "small_glass_case", categoryLabel: "Small Glass Case", items: [
+      { itemType: "Bracelet", itemName: "Art Deco Circlets", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Bracelet", itemName: "Coquard Bracelets", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Bracelet", itemName: "Pharaonic Bangles", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Bracelet", itemName: "Byzantine Hoops", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Bracelet", itemName: "Antique Bands", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Ring", itemName: "Coquard Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Ring", itemName: "Art Deco Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Ring", itemName: "Antique Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Fertility Statue", itemName: "Ivory", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard royal", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard enchante", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard decoratif", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard des abimes", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard verdoyant", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard de vouivre", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard forestier", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Meteorite Fragment", itemName: "Meteorite Fragment", valueMin: 70000, valueMax: 96000, valueIncrement: 2000, bagWeightPercent: 20 },
+      { itemType: "Fertility Statue", itemName: "Gold", valueMin: 70000, valueMax: 94500, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Fertility Statue", itemName: "Silver", valueMin: 70000, valueMax: 94500, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Fertility Statue", itemName: "Mahogany", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Fertility Statue", itemName: "Bronze", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 }
+    ] },
+    { categoryId: "tall_glass_case", categoryLabel: "Tall Glass Case", items: [
+      { itemType: "Horse Statue", itemName: "Silver Dapple Pinto", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Horse Statue", itemName: "Perlino Andalusian", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Horse Statue", itemName: "Marble Sabino Criollo", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Horse Statue", itemName: "Cremello Dutch Warmblood", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Horse Statue", itemName: "Gold Turkoman", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Necklace", itemName: "Coquard Carcanet (Red Spinel)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Necklace", itemName: "Coquard Carcanet (Emerald)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Necklace", itemName: "Coquard Carcanet (Sapphire)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Necklace", itemName: "Coquard Carcanet (Imperial Topaz)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Necklace", itemName: "Coquard Carcanet (Yellow Diamond)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Necklace", itemName: "Coquard Carcanet (Tanzanite)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Skull Statue", itemName: "Memento Non Mori (Emerald)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Skull Statue", itemName: "Memento Non Mori (Ruby)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Skull Statue", itemName: "Memento Non Mori (Gold)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Skull Statue", itemName: "Memento Non Mori (Amethyst)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Skull Statue", itemName: "Memento Non Mori (Sapphire)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Skull Statue", itemName: "Memento Non Mori (Diamond)", valueMin: 77500, valueMax: 100000, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Gemstone", itemName: "Ruby", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Gemstone", itemName: "Yellow Topaz", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Gemstone", itemName: "Tanzanite", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Gemstone", itemName: "Aquamarine", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Gemstone", itemName: "Gray Spinel", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Gemstone", itemName: "Purple Sapphire", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Gemstone", itemName: "Emerald", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Venus Statue", itemName: "Gold", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Venus Statue", itemName: "Silver", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Venus Statue", itemName: "Bronze", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Venus Statue", itemName: "Ivory", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 },
+      { itemType: "Venus Statue", itemName: "Marble", valueMin: 100000, valueMax: 127500, valueIncrement: 2500, bagWeightPercent: 30 }
+    ] },
+    { categoryId: "truck_crate", categoryLabel: "Truck Crate", items: [
+      { itemType: "Crate", itemName: "Crate in the loading bay", valueMin: 105000, valueMax: 140000, valueIncrement: 5000, bagWeightPercent: 30 }
+    ] },
+    { categoryId: "painting", categoryLabel: "Painting", items: [
+      { itemType: "Painting", itemName: "With Friends Like These", valueMin: 70000, valueMax: 92500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "Het Gouden Hondje", valueMin: 70000, valueMax: 92500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "Swingset Study No. LXIX", valueMin: 70000, valueMax: 92500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "The Hunter Becomes the Hunted", valueMin: 70000, valueMax: 92500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "Sod Off", valueMin: 102500, valueMax: 122500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "Cooked", valueMin: 102500, valueMax: 122500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "Do You See Me", valueMin: 102500, valueMax: 122500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "La Duchesse", valueMin: 102500, valueMax: 122500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "Explain Yourself", valueMin: 102500, valueMax: 122500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "The Chief", valueMin: 102500, valueMax: 122500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "Canis Hominem Edit", valueMin: 102500, valueMax: 122500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "Orange Crush", valueMin: 102500, valueMax: 122500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "The Great Circle Back", valueMin: 140000, valueMax: 162500, valueIncrement: 2500, bagWeightPercent: 50 },
+      { itemType: "Painting", itemName: "Don't Forgo These Blueprints", valueMin: 140000, valueMax: 162500, valueIncrement: 2500, bagWeightPercent: 50 }
+    ] }
+  ]
+};
+
+const KIND_TO_CATEGORY = { case: 'small_glass_case', tall: 'tall_glass_case', painting: 'painting', crate: 'truck_crate' };
+const KIND_TO_LOOT_TYPE = { case: 'Small Glass Case', tall: 'Tall Glass Case', painting: 'Painting', crate: 'Truck Crate', depositbox: 'Deposit Box' };
+const MAX_BUYER_REQUESTS = 3;
+const BUYER_REQUEST_BONUS = 50000;
+
+/* ---------------- Helpers ---------------- */
+function getCategory(id) { return LOOT_DATA.categories.find(c => c.categoryId === id); }
+function findItem(categoryId, itemName) { return getCategory(categoryId).items.find(it => it.itemName === itemName); }
+function groupByType(items) {
+  const order = []; const map = {};
+  items.forEach(it => { if (!map[it.itemType]) { map[it.itemType] = []; order.push(it.itemType); } map[it.itemType].push(it); });
+  return order.map(t => ({ itemType: t, items: map[t] }));
+}
+function itemMid(item) {
+  const step = item.valueIncrement || 500;
+  const raw = (item.valueMin + item.valueMax) / 2;
+  const snapped = item.valueMin + Math.round((raw - item.valueMin) / step) * step;
+  return Math.min(item.valueMax, Math.max(item.valueMin, snapped));
+}
+function fmtK(v) { const k = v / 1000; return Number.isInteger(k) ? String(k) : k.toFixed(1); }
+function kindTitle(kind, idx) {
+  if (kind === 'case') return `Small Case ${idx + 1}`;
+  if (kind === 'tall') return `Tall Case ${idx + 1}`;
+  if (kind === 'painting') return `Painting ${idx + 1}`;
+  if (kind === 'depositbox') return `Deposit Box ${idx + 1}`;
+  return `Crate`;
+}
+function mk(prefix, kind, count) {
+  return Array.from({ length: Math.max(0, count) }, (_, i) => ({ id: `${prefix}_${kind}_${i}`, kind, idx: i }));
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+/* 0/1 knapsack over 5% weight buckets */
+function knapsack(items, capacityPct) {
+  const capUnits = Math.max(0, Math.round(capacityPct / 5));
+  const n = items.length;
+  const dp = Array.from({ length: n + 1 }, () => new Array(capUnits + 1).fill(0));
+  for (let i = 1; i <= n; i++) {
+    const w = Math.round(items[i - 1].pct / 5);
+    const v = items[i - 1].value;
+    for (let c = 0; c <= capUnits; c++) {
+      dp[i][c] = dp[i - 1][c];
+      if (w <= c && dp[i - 1][c - w] + v > dp[i][c]) dp[i][c] = dp[i - 1][c - w] + v;
+    }
+  }
+  let c = capUnits;
+  const chosen = [];
+  for (let i = n; i >= 1; i--) {
+    if (dp[i][c] !== dp[i - 1][c]) { chosen.push(items[i - 1]); c -= Math.round(items[i - 1].pct / 5); }
+  }
+  const totalPct = chosen.reduce((s, it) => s + it.pct, 0);
+  return { items: chosen, value: dp[n][capUnits], pct: totalPct };
+}
+
+/* ---------------- State ---------------- */
+const state = {
+  tab: 'items',
+  playerCount: 1,
+  slots: {},          // id -> { itemKey, value, empty, skip }
+  depositBoxes: null, // array of values, or null => default
+  collapsed: {},      // sectionId -> bool
+  buyerRequests: [],  // [{ itemId, player }]
+};
+
+const DEFAULTS = {
+  floor1SmallCases: 2, floor1TallCases: 1,
+  floor2Paintings: 6, floor2SmallCases: 6,
+  floor3Paintings: 2, floor3SmallCases: 2, floor3TallCases: 2,
+  crispGalleryPaintings: 2, crispGallerySmallCases: 3, crispGalleryTallCases: 2,
+  vaultPaintings: 4, vaultDepositBoxes: 1,
+};
+
+function getSections() {
+  const p = DEFAULTS;
+  return [
+    { id: 'f1', label: 'Floor 1', crew: false, placements: [...mk('f1', 'case', p.floor1SmallCases), ...mk('f1', 'tall', p.floor1TallCases)] },
+    { id: 'f2', label: 'Floor 2', crew: false, placements: [...mk('f2', 'painting', p.floor2Paintings), ...mk('f2', 'case', p.floor2SmallCases)] },
+    { id: 'f3', label: 'Floor 3', crew: false, note: 'Tall cases require Glass Cutter prep', placements: [...mk('f3', 'painting', p.floor3Paintings), ...mk('f3', 'case', p.floor3SmallCases), ...mk('f3', 'tall', p.floor3TallCases)] },
+    { id: 'crisp', label: 'Crisp Gallery — 3rd floor (needs 2+ players)', crew: true, placements: [...mk('crisp', 'painting', p.crispGalleryPaintings), ...mk('crisp', 'case', p.crispGallerySmallCases), ...mk('crisp', 'tall', p.crispGalleryTallCases)] },
+    { id: 'vault', label: 'Vault', crew: false, note: 'Deposit boxes are low value — usually skip unless space is spare', placements: mk('vault', 'painting', p.vaultPaintings) },
+    { id: 'garage', label: 'Garage', crew: false, placements: mk('garage', 'crate', 1) },
+  ];
+}
+
+function getDepositBoxes() {
+  return state.depositBoxes || Array.from({ length: DEFAULTS.vaultDepositBoxes }, () => 7500);
+}
+
+function computeDefaultItemKeys() {
+  const counters = {}; const map = {};
+  getSections().forEach(sec => sec.placements.forEach(pl => {
+    if (pl.kind === 'crate') return;
+    const categoryId = KIND_TO_CATEGORY[pl.kind];
+    const items = getCategory(categoryId).items;
+    const idx = (counters[categoryId] || 0) % items.length;
+    counters[categoryId] = (counters[categoryId] || 0) + 1;
+    map[pl.id] = items[idx].itemName;
+  }));
+  return map;
+}
+
+function buildPool() {
+  const pool = [];
+  const defaultItemKeys = computeDefaultItemKeys();
+  getDepositBoxes().forEach((val, idx) => {
+    pool.push({ id: `vault_depositbox_${idx}`, pct: 5, value: val, categoryLabel: 'Deposit Box', lootType: 'Deposit Box', locationLabel: 'Vault' });
+  });
+  getSections().forEach(sec => {
+    if (sec.crew && state.playerCount < 2) return;
+    sec.placements.forEach(pl => {
+      const categoryId = KIND_TO_CATEGORY[pl.kind];
+      if (pl.kind === 'crate') {
+        const item = getCategory(categoryId).items[0];
+        const defaultVal = item.valueMin;
+        const slot = state.slots[pl.id] || { value: defaultVal };
+        if (slot.skip) return;
+        pool.push({ id: pl.id, pct: item.bagWeightPercent, value: slot.value !== undefined ? slot.value : defaultVal, categoryLabel: item.itemName, lootType: KIND_TO_LOOT_TYPE[pl.kind], locationLabel: sec.label });
+      } else {
+        const slot = state.slots[pl.id] || {};
+        if (slot.empty) return;
+        const itemKey = slot.itemKey || defaultItemKeys[pl.id];
+        const item = findItem(categoryId, itemKey);
+        const value = slot.value !== undefined ? slot.value : itemMid(item);
+        pool.push({ id: pl.id, pct: item.bagWeightPercent, value, categoryLabel: item.itemName, lootType: KIND_TO_LOOT_TYPE[pl.kind], locationLabel: sec.label });
+      }
+    });
+  });
+  return pool;
+}
+
+function computeAssignments(pool, playerCount, buyerRequests) {
+  const validRequests = buyerRequests
+    .map(br => ({ item: pool.find(it => it.id === br.itemId), player: Math.min(Math.max(1, br.player || 1), playerCount) }))
+    .filter(br => br.item);
+  const lockedByPlayer = {};
+  validRequests.forEach(br => { (lockedByPlayer[br.player] = lockedByPlayer[br.player] || []).push(br.item); });
+  const lockedIds = new Set(validRequests.map(br => br.item.id));
+  let remaining = pool.filter(it => !lockedIds.has(it.id));
+  const results = {};
+  for (let p = 1; p <= playerCount; p++) {
+    const lockedItems = lockedByPlayer[p] || [];
+    const lockedPct = lockedItems.reduce((s, it) => s + it.pct, 0);
+    const lockedValue = lockedItems.reduce((s, it) => s + it.value, 0);
+    const capacity = Math.max(0, 100 - lockedPct);
+    const solved = knapsack(remaining, capacity);
+    const chosenIds = new Set(solved.items.map(it => it.id));
+    remaining = remaining.filter(it => !chosenIds.has(it.id));
+    results[p] = { lockedItems, fillItems: solved.items, value: solved.value + lockedValue, pctUsed: solved.pct + lockedPct };
+  }
+  const bonusActive = validRequests.length === MAX_BUYER_REQUESTS;
+  return { results, bonusActive };
+}
+
+/* ---------------- Mutations ---------------- */
+function setTab(t) { state.tab = t; render(); }
+function setPlayerCount(n) { state.playerCount = n; render(); }
+function resetAll() { state.slots = {}; state.depositBoxes = null; state.buyerRequests = []; render(); }
+function toggleCollapse(id) { state.collapsed[id] = !state.collapsed[id]; render(); }
+function toggleEmpty(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, empty: !cur.empty }; render(); }
+function toggleSkip(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, skip: !cur.skip }; render(); }
+function setItemKey(id, categoryId, itemName) {
+  const item = findItem(categoryId, itemName); const cur = state.slots[id] || {};
+  state.slots[id] = { ...cur, empty: false, itemKey: itemName, value: itemMid(item) }; render();
+}
+function setValue(id, val) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, value: val }; }
+function addDepositBox() { const arr = getDepositBoxes(); state.depositBoxes = [...arr, 7500]; render(); }
+function removeDepositBox(idx) { const arr = getDepositBoxes(); state.depositBoxes = arr.filter((_, i) => i !== idx); render(); }
+function setDepositBoxValue(idx, val) { const arr = getDepositBoxes().slice(); arr[idx] = val; state.depositBoxes = arr; }
+function toggleBuyerRequest(id) {
+  const exists = state.buyerRequests.some(br => br.itemId === id);
+  if (exists) { state.buyerRequests = state.buyerRequests.filter(br => br.itemId !== id); render(); return; }
+  if (state.buyerRequests.length >= MAX_BUYER_REQUESTS) return;
+  const usedPlayers = new Set(state.buyerRequests.map(br => br.player));
+  let player = 1;
+  for (let p = 1; p <= state.playerCount; p++) { if (!usedPlayers.has(p)) { player = p; break; } }
+  state.buyerRequests = [...state.buyerRequests, { itemId: id, player }]; render();
+}
+function setBuyerPlayer(id, player) {
+  state.buyerRequests = state.buyerRequests.map(br => br.itemId === id ? { ...br, player } : br); render();
+}
+
+/* ---------------- Render ---------------- */
+const bodyEl = document.getElementById('body');
+
+function render() {
+  const pool = buildPool();
+  const poolTotalValue = pool.reduce((s, it) => s + it.value, 0);
+
+  // header tab labels / active states
+  document.getElementById('tabItems').textContent = `Loot Available - ${pool.length}`;
+  document.getElementById('playerSelect').value = String(state.playerCount);
+  document.getElementById('tabItems').classList.toggle('active', state.tab === 'items');
+  document.getElementById('tabResults').classList.toggle('active', state.tab === 'results');
+
+  if (state.tab === 'items') {
+    bodyEl.innerHTML = renderItemsTab(pool, poolTotalValue);
+  } else {
+    bodyEl.innerHTML = renderResultsTab(pool);
+  }
+  attachListeners();
+}
+
+function renderItemsTab(pool, poolTotalValue) {
+  const defaultItemKeys = computeDefaultItemKeys();
+  const depositBoxes = getDepositBoxes();
+  let html = `<div class="hint">${pool.length} items in play - $${fmtK(poolTotalValue)}k total pool value</div>`;
+
+  getSections().filter(sec => !sec.crew || state.playerCount >= 2).forEach(sec => {
+    const collapsed = !!state.collapsed[sec.id];
+    html += `<div class="card"><button class="sec-toggle" data-act="collapse" data-id="${sec.id}">
+      <span class="sec-label">${esc(sec.label)}</span>
+      <span class="sec-chevron">${collapsed ? '▸ show' : '▾ hide'}</span></button>`;
+    if (!collapsed) {
+      if (sec.note) html += `<div class="sec-note">${esc(sec.note)}</div>`;
+      sec.placements.forEach(pl => { html += renderPlacement(pl, sec, defaultItemKeys); });
+      if (sec.id === 'vault') {
+        depositBoxes.forEach((val, idx) => { html += renderDepositBox(idx, val, depositBoxes.length > 1); });
+        html += `<button class="add-deposit" data-act="add-deposit">+ Add deposit box</button>`;
+      }
+    }
+    html += `</div>`;
+  });
+  return html;
+}
+
+function renderPlacement(pl, sec, defaultItemKeys) {
+  const categoryId = KIND_TO_CATEGORY[pl.kind];
+  const title = kindTitle(pl.kind, pl.idx);
+
+  if (pl.kind === 'crate') {
+    const item = getCategory(categoryId).items[0];
+    const slot = state.slots[pl.id] || {};
+    const skip = !!slot.skip;
+    const value = slot.value !== undefined ? slot.value : item.valueMin;
+    let h = `<div class="placement"><div class="pl-head">
+      <div class="pl-title">${esc(title)}<span class="pl-pct">${item.bagWeightPercent}% bag</span></div>
+      <label class="pl-check"><input type="checkbox" data-act="skip" data-id="${pl.id}" ${skip ? 'checked' : ''}/>Skip</label></div>`;
+    if (!skip) {
+      h += sliderRow(pl.id, item.valueMin, item.valueMax, item.valueIncrement || 5000, value);
+    }
+    return h + `</div>`;
+  }
+
+  const slot = state.slots[pl.id] || {};
+  const empty = !!slot.empty;
+  const cat = getCategory(categoryId);
+  const itemKey = slot.itemKey || defaultItemKeys[pl.id];
+  const item = findItem(categoryId, itemKey);
+  const value = slot.value !== undefined ? slot.value : itemMid(item);
+
+  const buyerReq = state.buyerRequests.find(br => br.itemId === pl.id);
+  const isBuyerRequest = !!buyerReq;
+  const buyerFull = state.buyerRequests.length >= MAX_BUYER_REQUESTS && !isBuyerRequest;
+
+  let h = `<div class="placement"><div class="pl-head">
+    <div class="pl-title">${esc(title)}<span class="pl-pct">${item.bagWeightPercent}% bag</span></div>
+    <label class="pl-check"><input type="checkbox" data-act="empty" data-id="${pl.id}" ${empty ? 'checked' : ''}/>Empty</label></div>`;
+
+  if (!empty) {
+    // item select with optgroups
+    let opts = '';
+    groupByType(cat.items).forEach(g => {
+      opts += `<optgroup label="${esc(g.itemType)}">`;
+      g.items.forEach(it => {
+        const sel = it.itemName === itemKey ? 'selected' : '';
+        opts += `<option value="${esc(it.itemName)}" ${sel}>${esc(it.itemName)} — ${it.bagWeightPercent}%</option>`;
+      });
+      opts += `</optgroup>`;
+    });
+    h += `<select class="item" data-act="item" data-id="${pl.id}" data-cat="${categoryId}">${opts}</select>`;
+    h += sliderRow(pl.id, item.valueMin, item.valueMax, item.valueIncrement || 500, value);
+
+    // buyer's request
+    h += `<label class="buyer-label" style="opacity:${buyerFull ? 0.4 : 1}">
+      <input type="checkbox" data-act="buyer" data-id="${pl.id}" ${isBuyerRequest ? 'checked' : ''}/>Buyer's Request</label>`;
+    if (isBuyerRequest && state.playerCount > 1) {
+      let bopts = '';
+      for (let i = 1; i <= state.playerCount; i++) bopts += `<option value="${i}" ${buyerReq.player === i ? 'selected' : ''}>Player ${i}</option>`;
+      h += `<label class="buyer-pick">for <select class="buyer" data-act="buyer-player" data-id="${pl.id}">${bopts}</select></label>`;
+    }
+  }
+  return h + `</div>`;
+}
+
+function renderDepositBox(idx, val, showRemove) {
+  const id = `vault_depositbox_${idx}`;
+  let h = `<div class="placement"><div class="pl-head">
+    <div class="pl-title">Deposit Box ${idx + 1}<span class="pl-pct">5% bag</span></div>`;
+  if (showRemove) h += `<button class="pl-remove" data-act="remove-deposit" data-idx="${idx}">Remove</button>`;
+  h += `</div>` + sliderRow(id, 5000, 12500, 500, val, true) + `</div>`;
+  return h;
+}
+
+function sliderRow(id, min, max, step, value, isDeposit) {
+  return `<div class="slider-row">
+    <input type="range" min="${min}" max="${max}" step="${step}" value="${value}"
+      data-act="${isDeposit ? 'deposit-slide' : 'slide'}" data-id="${esc(id)}" ${isDeposit ? `data-idx="${id.replace('vault_depositbox_','')}"` : ''}/>
+    <div class="slider-val" data-valfor="${esc(id)}">$${fmtK(value)}k</div></div>`;
+}
+
+function renderResultsTab(pool) {
+  const { results, bonusActive } = computeAssignments(pool, state.playerCount, state.buyerRequests);
+  let html = '';
+  if (state.playerCount > 1) {
+    html += `<div class="note-box">Bags fill one player at a time, Player 1 first, so the split can land a few % off the true combined optimum.</div>`;
+  }
+  html += `<div class="hint">${state.buyerRequests.length}/3 Buyer's Requests selected (marked with * below)</div>`;
+
+  for (let num = 1; num <= state.playerCount; num++) {
+    const a = results[num];
+    const rows = [
+      ...a.lockedItems.map(it => ({ ...it, isLocked: true })),
+      ...a.fillItems.map(it => ({ ...it, isLocked: false })),
+    ];
+    html += `<div class="card">
+      <div class="p-head"><div class="p-name">Player ${num}</div>
+        <div class="p-meta">${a.pctUsed}% used - ${100 - a.pctUsed}% left</div></div>
+      <div class="bar"><div class="bar-fill" style="width:${Math.min(100, a.pctUsed)}%"></div></div>
+      <div style="display:flex;flex-direction:column">`;
+    if (rows.length) {
+      rows.forEach(it => {
+        const color = it.isLocked ? '#d2cefd' : 'var(--text)';
+        html += `<div class="res-row">
+          <div class="res-line" style="color:${color}">
+            <span>${esc(it.categoryLabel)}${it.isLocked ? ' *' : ''}</span>
+            <span style="font-variant-numeric:tabular-nums">$${fmtK(it.value)}k - ${it.pct}%</span></div>
+          <div class="res-sub">${esc(it.locationLabel)} &middot; ${esc(it.lootType)}</div></div>`;
+      });
+    } else {
+      html += `<div class="empty-msg">Enter scouted items on the Loot Available tab to see a suggested fill.</div>`;
+    }
+    html += `</div><div class="bag-total"><span class="bag-total-label">Bag total</span>
+      <span class="bag-total-val">$${fmtK(a.value)}k</span></div></div>`;
+  }
+
+  if (bonusActive) {
+    html += `<div class="bonus-box">All 3 Buyer's Requests fulfilled - +$50k bonus payout included below</div>`;
+  }
+  const grandTotal = Object.keys(results).reduce((s, k) => s + results[k].value, 0) + (bonusActive ? BUYER_REQUEST_BONUS : 0);
+  html += `<div class="grand"><span class="grand-label">Total payout</span>
+    <span class="grand-val">$${fmtK(grandTotal)}k</span></div>`;
+  return html;
+}
+
+/* ---------------- Event wiring ---------------- */
+function updatePoolTotalLive() {
+  const pool = buildPool();
+  const total = pool.reduce((s, it) => s + it.value, 0);
+  const hint = bodyEl.querySelector('.hint');
+  if (hint) hint.textContent = `${pool.length} items in play - $${fmtK(total)}k total pool value`;
+}
+
+function attachListeners() {
+  bodyEl.querySelectorAll('[data-act]').forEach(el => {
+    const act = el.dataset.act;
+    const id = el.dataset.id;
+    if (act === 'collapse') el.addEventListener('click', () => toggleCollapse(id));
+    else if (act === 'skip') el.addEventListener('change', () => toggleSkip(id));
+    else if (act === 'empty') el.addEventListener('change', () => toggleEmpty(id));
+    else if (act === 'item') el.addEventListener('change', e => setItemKey(id, el.dataset.cat, e.target.value));
+    else if (act === 'buyer') el.addEventListener('change', () => toggleBuyerRequest(id));
+    else if (act === 'buyer-player') el.addEventListener('change', e => setBuyerPlayer(id, parseInt(e.target.value, 10)));
+    else if (act === 'add-deposit') el.addEventListener('click', addDepositBox);
+    else if (act === 'remove-deposit') el.addEventListener('click', () => removeDepositBox(parseInt(el.dataset.idx, 10)));
+    else if (act === 'slide') {
+      el.addEventListener('input', e => {
+        const v = parseFloat(e.target.value);
+        setValue(id, v);
+        const lab = bodyEl.querySelector(`[data-valfor="${CSS.escape(id)}"]`);
+        if (lab) lab.textContent = `$${fmtK(v)}k`;
+        updatePoolTotalLive();
+      });
+    } else if (act === 'deposit-slide') {
+      el.addEventListener('input', e => {
+        const v = parseFloat(e.target.value);
+        setDepositBoxValue(parseInt(el.dataset.idx, 10), v);
+        const lab = bodyEl.querySelector(`[data-valfor="${CSS.escape(id)}"]`);
+        if (lab) lab.textContent = `$${fmtK(v)}k`;
+        updatePoolTotalLive();
+      });
+    }
+  });
+}
+
+document.getElementById('resetBtn').addEventListener('click', resetAll);
+document.getElementById('playerSelect').addEventListener('change', e => setPlayerCount(parseInt(e.target.value, 10)));
+document.getElementById('tabItems').addEventListener('click', () => setTab('items'));
+document.getElementById('tabResults').addEventListener('click', () => setTab('results'));
+
+render();
+</script>
+</body>
+</html>
