@@ -97,7 +97,8 @@
   </div>
   <div class="body" id="body"></div>
   <div class="footer">
-    GTA Online - The Kortz Center Heist. Bag %s &amp; value ranges are community estimates; drag sliders to match your scouted run.
+    GTA Online - The Kortz Center Heist. Bag %s &amp; value ranges are community estimates; drag sliders to match your scouted run.<br>
+    Your entries auto-save to this browser/device - Reset clears them for good.
   </div>
 </div>
 
@@ -110,8 +111,8 @@ const LOOT_DATA = {
     { categoryId: "small_glass_case", categoryLabel: "Small Glass Case", items: [
       { itemType: "Bracelet", itemName: "Art Deco Circlets", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Bracelet", itemName: "Coquard Bracelets", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
-      { itemType: "Bracelet", itemName: "Pharaonic Bangles", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
-      { itemType: "Bracelet", itemName: "Byzantine Hoops", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Bracelet", itemName: "Pharaonic Bangles", valueMin: 29000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Bracelet", itemName: "Byzantine Hoops", valueMin: 33000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Bracelet", itemName: "Antique Bands", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Ring", itemName: "Coquard Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Ring", itemName: "Art Deco Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
@@ -126,7 +127,7 @@ const LOOT_DATA = {
       { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard forestier", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Meteorite Fragment", itemName: "Meteorite Fragment", valueMin: 70000, valueMax: 96000, valueIncrement: 2000, bagWeightPercent: 20 },
       { itemType: "Fertility Statue", itemName: "Gold", valueMin: 70000, valueMax: 94500, valueIncrement: null, bagWeightPercent: 20 },
-      { itemType: "Fertility Statue", itemName: "Silver", valueMin: 70000, valueMax: 94500, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Fertility Statue", itemName: "Silver", valueMin: 56000, valueMax: 94500, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Fertility Statue", itemName: "Mahogany", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Fertility Statue", itemName: "Bronze", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 }
     ] },
@@ -238,6 +239,20 @@ function knapsack(items, capacityPct) {
 }
 
 /* ---------------- State ---------------- */
+const STORAGE_KEY = 'kortzLootCalculatorState_v1';
+
+function saveState() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable, ignore */ }
+}
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    Object.assign(state, saved);
+  } catch (e) { /* corrupt or unavailable, start fresh */ }
+}
+
 const state = {
   tab: 'items',
   playerCount: 1,
@@ -337,31 +352,31 @@ function computeAssignments(pool, playerCount, buyerRequests) {
 }
 
 /* ---------------- Mutations ---------------- */
-function setTab(t) { state.tab = t; render(); }
-function setPlayerCount(n) { state.playerCount = n; render(); }
-function resetAll() { state.slots = {}; state.depositBoxes = null; state.buyerRequests = []; render(); }
-function toggleCollapse(id) { state.collapsed[id] = !state.collapsed[id]; render(); }
-function toggleEmpty(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, empty: !cur.empty }; render(); }
-function toggleSkip(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, skip: !cur.skip }; render(); }
+function setTab(t) { state.tab = t; saveState(); render(); }
+function setPlayerCount(n) { state.playerCount = n; saveState(); render(); }
+function resetAll() { state.slots = {}; state.depositBoxes = null; state.buyerRequests = []; saveState(); render(); }
+function toggleCollapse(id) { state.collapsed[id] = !state.collapsed[id]; saveState(); render(); }
+function toggleEmpty(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, empty: !cur.empty }; saveState(); render(); }
+function toggleSkip(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, skip: !cur.skip }; saveState(); render(); }
 function setItemKey(id, categoryId, itemName) {
   const item = findItem(categoryId, itemName); const cur = state.slots[id] || {};
-  state.slots[id] = { ...cur, empty: false, itemKey: itemName, value: itemMid(item) }; render();
+  state.slots[id] = { ...cur, empty: false, itemKey: itemName, value: itemMid(item) }; saveState(); render();
 }
-function setValue(id, val) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, value: val }; }
-function addDepositBox() { const arr = getDepositBoxes(); state.depositBoxes = [...arr, 7500]; render(); }
-function removeDepositBox(idx) { const arr = getDepositBoxes(); state.depositBoxes = arr.filter((_, i) => i !== idx); render(); }
-function setDepositBoxValue(idx, val) { const arr = getDepositBoxes().slice(); arr[idx] = val; state.depositBoxes = arr; }
+function setValue(id, val) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, value: val }; saveState(); }
+function addDepositBox() { const arr = getDepositBoxes(); state.depositBoxes = [...arr, 7500]; saveState(); render(); }
+function removeDepositBox(idx) { const arr = getDepositBoxes(); state.depositBoxes = arr.filter((_, i) => i !== idx); saveState(); render(); }
+function setDepositBoxValue(idx, val) { const arr = getDepositBoxes().slice(); arr[idx] = val; state.depositBoxes = arr; saveState(); }
 function toggleBuyerRequest(id) {
   const exists = state.buyerRequests.some(br => br.itemId === id);
-  if (exists) { state.buyerRequests = state.buyerRequests.filter(br => br.itemId !== id); render(); return; }
+  if (exists) { state.buyerRequests = state.buyerRequests.filter(br => br.itemId !== id); saveState(); render(); return; }
   if (state.buyerRequests.length >= MAX_BUYER_REQUESTS) return;
   const usedPlayers = new Set(state.buyerRequests.map(br => br.player));
   let player = 1;
   for (let p = 1; p <= state.playerCount; p++) { if (!usedPlayers.has(p)) { player = p; break; } }
-  state.buyerRequests = [...state.buyerRequests, { itemId: id, player }]; render();
+  state.buyerRequests = [...state.buyerRequests, { itemId: id, player }]; saveState(); render();
 }
 function setBuyerPlayer(id, player) {
-  state.buyerRequests = state.buyerRequests.map(br => br.itemId === id ? { ...br, player } : br); render();
+  state.buyerRequests = state.buyerRequests.map(br => br.itemId === id ? { ...br, player } : br); saveState(); render();
 }
 
 /* ---------------- Render ---------------- */
@@ -572,6 +587,7 @@ document.getElementById('playerSelect').addEventListener('change', e => setPlaye
 document.getElementById('tabItems').addEventListener('click', () => setTab('items'));
 document.getElementById('tabResults').addEventListener('click', () => setTab('results'));
 
+loadState();
 render();
 </script>
 </body>
