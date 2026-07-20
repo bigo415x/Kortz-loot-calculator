@@ -39,6 +39,9 @@
   .sec-label { font-weight:500; font-size:14px; }
   .sec-chevron { font-size:11px; color:var(--muted2); }
   .sec-note { font-size:11px; color:var(--muted2); }
+  .subgroup { display:flex; flex-direction:column; gap:4px; background:rgba(233,233,237,0.04); border-radius:6px; padding:2px 8px; }
+  .sub-toggle { all:unset; cursor:pointer; display:flex; align-items:center; justify-content:space-between; min-height:32px; }
+  .sub-label { font-size:12.5px; font-weight:500; color:rgba(233,233,237,0.85); }
   .placement { display:flex; flex-direction:column; gap:6px; padding:6px 0; border-bottom:1px solid var(--line-soft); }
   .placement:last-child { border-bottom:none; }
   .pl-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
@@ -197,6 +200,12 @@ function groupByType(items) {
   items.forEach(it => { if (!map[it.itemType]) { map[it.itemType] = []; order.push(it.itemType); } map[it.itemType].push(it); });
   return order.map(t => ({ itemType: t, items: map[t] }));
 }
+function groupPlacementsByKind(placements) {
+  const order = []; const map = {};
+  placements.forEach(pl => { if (!map[pl.kind]) { map[pl.kind] = []; order.push(pl.kind); } map[pl.kind].push(pl); });
+  return order.map(k => ({ kind: k, placements: map[k] }));
+}
+const KIND_GROUP_LABEL = { case: 'Small Cases', tall: 'Tall Cases', painting: 'Paintings', crate: 'Truck Crate', depositbox: 'Deposit Boxes' };
 function itemMid(item) {
   const step = item.valueIncrement || 500;
   const raw = (item.valueMin + item.valueMax) / 2;
@@ -412,10 +421,34 @@ function renderItemsTab(pool, poolTotalValue) {
       <span class="sec-chevron">${collapsed ? '▸ show' : '▾ hide'}</span></button>`;
     if (!collapsed) {
       if (sec.note) html += `<div class="sec-note">${esc(sec.note)}</div>`;
-      sec.placements.forEach(pl => { html += renderPlacement(pl, sec, defaultItemKeys); });
-      if (sec.id === 'vault') {
-        depositBoxes.forEach((val, idx) => { html += renderDepositBox(idx, val, depositBoxes.length > 1); });
-        html += `<button class="add-deposit" data-act="add-deposit">+ Add deposit box</button>`;
+      const kindGroups = groupPlacementsByKind(sec.placements);
+      const isVault = sec.id === 'vault';
+      const nestByKind = kindGroups.length > 1 || isVault;
+
+      if (nestByKind) {
+        kindGroups.forEach(g => {
+          const subId = `${sec.id}::${g.kind}`;
+          const subCollapsed = !!state.collapsed[subId];
+          html += `<div class="subgroup"><button class="sub-toggle" data-act="collapse" data-id="${subId}">
+            <span class="sub-label">${esc(KIND_GROUP_LABEL[g.kind])} (${g.placements.length})</span>
+            <span class="sec-chevron">${subCollapsed ? '▸ show' : '▾ hide'}</span></button>`;
+          if (!subCollapsed) { g.placements.forEach(pl => { html += renderPlacement(pl, sec, defaultItemKeys); }); }
+          html += `</div>`;
+        });
+        if (isVault) {
+          const subId = `${sec.id}::depositbox`;
+          const subCollapsed = !!state.collapsed[subId];
+          html += `<div class="subgroup"><button class="sub-toggle" data-act="collapse" data-id="${subId}">
+            <span class="sub-label">${esc(KIND_GROUP_LABEL.depositbox)} (${depositBoxes.length})</span>
+            <span class="sec-chevron">${subCollapsed ? '▸ show' : '▾ hide'}</span></button>`;
+          if (!subCollapsed) {
+            depositBoxes.forEach((val, idx) => { html += renderDepositBox(idx, val, depositBoxes.length > 1); });
+            html += `<button class="add-deposit" data-act="add-deposit">+ Add deposit box</button>`;
+          }
+          html += `</div>`;
+        }
+      } else {
+        sec.placements.forEach(pl => { html += renderPlacement(pl, sec, defaultItemKeys); });
       }
     }
     html += `</div>`;
