@@ -113,9 +113,9 @@ const LOOT_DATA = {
   categories: [
     { categoryId: "small_glass_case", categoryLabel: "Small Glass Case", items: [
       { itemType: "Bracelet", itemName: "Art Deco Circlets", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
-      { itemType: "Bracelet", itemName: "Coquard Bracelets", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Bracelet", itemName: "Coquard Bracelets", valueMin: 32000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Bracelet", itemName: "Pharaonic Bangles", valueMin: 29000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
-      { itemType: "Bracelet", itemName: "Byzantine Hoops", valueMin: 33000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Bracelet", itemName: "Byzantine Hoops", valueMin: 32000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Bracelet", itemName: "Antique Bands", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Ring", itemName: "Coquard Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Ring", itemName: "Art Deco Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
@@ -127,9 +127,9 @@ const LOOT_DATA = {
       { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard des abimes", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard verdoyant", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard de vouivre", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
-      { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard forestier", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard forestier", valueMin: 49000, valueMax: 64000, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Meteorite Fragment", itemName: "Meteorite Fragment", valueMin: 70000, valueMax: 96000, valueIncrement: 2000, bagWeightPercent: 20 },
-      { itemType: "Fertility Statue", itemName: "Gold", valueMin: 70000, valueMax: 94500, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Fertility Statue", itemName: "Gold", valueMin: 52000, valueMax: 94500, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Fertility Statue", itemName: "Silver", valueMin: 56000, valueMax: 94500, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Fertility Statue", itemName: "Mahogany", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Fertility Statue", itemName: "Bronze", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 }
@@ -213,6 +213,12 @@ function itemMid(item) {
   return Math.min(item.valueMax, Math.max(item.valueMin, snapped));
 }
 function fmtK(v) { const k = v / 1000; return Number.isInteger(k) ? String(k) : k.toFixed(1); }
+function itemDisplayLabel(item) {
+  const nameLower = item.itemName.toLowerCase();
+  const typeLower = item.itemType.toLowerCase();
+  if (nameLower.includes(typeLower)) return item.itemName;
+  return `${item.itemType} — ${item.itemName}`;
+}
 function kindTitle(kind, idx) {
   if (kind === 'case') return `Small Case ${idx + 1}`;
   if (kind === 'tall') return `Tall Case ${idx + 1}`;
@@ -323,14 +329,14 @@ function buildPool() {
         const defaultVal = item.valueMin;
         const slot = state.slots[pl.id] || { value: defaultVal };
         if (slot.skip) return;
-        pool.push({ id: pl.id, pct: item.bagWeightPercent, value: slot.value !== undefined ? slot.value : defaultVal, categoryLabel: item.itemName, lootType: KIND_TO_LOOT_TYPE[pl.kind], locationLabel: sec.label });
+        pool.push({ id: pl.id, pct: item.bagWeightPercent, value: slot.value !== undefined ? slot.value : defaultVal, categoryLabel: itemDisplayLabel(item), lootType: KIND_TO_LOOT_TYPE[pl.kind], locationLabel: sec.label });
       } else {
         const slot = state.slots[pl.id] || {};
         if (slot.empty) return;
         const itemKey = slot.itemKey || defaultItemKeys[pl.id];
         const item = findItem(categoryId, itemKey);
         const value = slot.value !== undefined ? slot.value : itemMid(item);
-        pool.push({ id: pl.id, pct: item.bagWeightPercent, value, categoryLabel: item.itemName, lootType: KIND_TO_LOOT_TYPE[pl.kind], locationLabel: sec.label });
+        pool.push({ id: pl.id, pct: item.bagWeightPercent, value, categoryLabel: itemDisplayLabel(item), lootType: KIND_TO_LOOT_TYPE[pl.kind], locationLabel: sec.label });
       }
     });
   });
@@ -496,7 +502,7 @@ function renderPlacement(pl, sec, defaultItemKeys) {
       opts += `<optgroup label="${esc(g.itemType)}">`;
       g.items.forEach(it => {
         const sel = it.itemName === itemKey ? 'selected' : '';
-        opts += `<option value="${esc(it.itemName)}" ${sel}>${esc(it.itemName)} — ${it.bagWeightPercent}%</option>`;
+        opts += `<option value="${esc(it.itemName)}" ${sel}>${esc(itemDisplayLabel(it))} — ${it.bagWeightPercent}%</option>`;
       });
       opts += `</optgroup>`;
     });
