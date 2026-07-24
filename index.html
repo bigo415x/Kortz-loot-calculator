@@ -405,63 +405,53 @@ function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests
     const capacity = Math.max(0, 100 - lockedPct);
     const crispBlocked = it => it.isCrisp && (hackerIdx === null || i === hackerIdx);
 
-    // Primary pass: fill from this player's home floor first (value, then room-grouping as tiebreak).
-    const primaryPool = groupSortForProximity(pool.filter(it => !claimedIds.has(it.id) && it.cluster === cluster && !crispBlocked(it)));
-    const primarySolved = knapsack(primaryPool, capacity);
-    primarySolved.items.forEach(it => claimedIds.add(it.id));
+    // A single knapsack over the FULL available pool for the FULL capacity guarantees true
+    // value-maximality - the actual goal. Home-floor items are just sorted first so ties in the
+    // DP favor staying local (proximity), but a genuinely higher-value item elsewhere always wins;
+    // small home-floor items never get to "lock in" capacity before a bigger outside item competes.
+    const available = pool.filter(it => !claimedIds.has(it.id) && !crispBlocked(it));
+    const primary = groupSortForProximity(available.filter(it => it.cluster === cluster));
+    const outside = groupSortForProximity(available.filter(it => it.cluster !== cluster));
+    const solved = knapsack([...primary, ...outside], capacity);
+    solved.items.forEach(it => claimedIds.add(it.id));
+    const spillPct = solved.items.filter(it => it.cluster !== cluster).reduce((s, it) => s + it.pct, 0);
 
-    // Spillover: only reached once the home floor has nothing left that fits the remaining space.
-    let fillItems = primarySolved.items;
-    let usedPct = primarySolved.pct;
-    let usedValue = primarySolved.value;
-    let spillPct = 0;
-    const remainingCapacity = capacity - usedPct;
-    if (remainingCapacity > 0) {
-      const outsidePool = pool.filter(it => !claimedIds.has(it.id) && it.cluster !== cluster && !crispBlocked(it));
-      const outsideSolved = knapsack(outsidePool, remainingCapacity);
-      outsideSolved.items.forEach(it => claimedIds.add(it.id));
-      fillItems = [...fillItems, ...outsideSolved.items];
-      usedPct += outsideSolved.pct;
-      usedValue += outsideSolved.value;
-      spillPct = outsideSolved.pct;
-    }
-
-    players.push({ num: i + 1, cluster, isHacker: i === hackerIdx, lockedItems: locked, fillItems, value: usedValue + lockedValue, pctUsed: usedPct + lockedPct, spillPct });
+    players.push({ num: i + 1, cluster, isHacker: i === hackerIdx, lockedItems: locked, fillItems: solved.items, value: solved.value + lockedValue, pctUsed: solved.pct + lockedPct, spillPct });
   }
   const bonusActive = fulfilledCount === MAX_BUYER_REQUESTS && validRequests.length === MAX_BUYER_REQUESTS;
   const totalValue = players.reduce((s, p) => s + p.value, 0) + (bonusActive ? BUYER_REQUEST_BONUS : 0);
   const totalSpillPct = players.reduce((s, p) => s + p.spillPct, 0);
-  return { players, bonusActive, totalValue, totalSpillPct };
+  return { players, bonusActive, fulfilledCount, totalValue, totalSpillPct };
 }
 
 // Solo has no floor assignment or Hacker concept (Crisp Gallery isn't accessible at 1 player anyway) -
-// it's just one bag pulling from the whole pool, same as before.
+// route it through evaluatePlan too (cluster null matches only Vault/Garage as "primary", everything
+// else is "outside", combined into the same single value-maximizing knapsack pass).
 function computeCrewPlan(pool, playerCount, buyerRequestIds) {
   const validRequests = buyerRequestIds.map(id => pool.find(it => it.id === id)).filter(Boolean);
 
   if (playerCount <= 1) {
-    const lockedPct = validRequests.reduce((s, it) => s + it.pct, 0);
-    const lockedValue = validRequests.reduce((s, it) => s + it.value, 0);
-    const claimedIds = new Set(validRequests.map(it => it.id));
-    const rest = groupSortForProximity(pool.filter(it => !claimedIds.has(it.id)));
-    const capacity = Math.max(0, 100 - lockedPct);
-    const solved = knapsack(rest, capacity);
-    const bonusActive = validRequests.length === MAX_BUYER_REQUESTS;
-    const player = { num: 1, cluster: null, isHacker: false, lockedItems: validRequests, fillItems: solved.items, value: solved.value + lockedValue, pctUsed: solved.pct + lockedPct };
-    return { players: [player], bonusActive, totalValue: player.value + (bonusActive ? BUYER_REQUEST_BONUS : 0) };
+    return evaluatePlan(pool, 1, [null], null, validRequests);
   }
 
-  // Brute-force every floor assignment x Hacker choice (small search space, instant) and keep the best:
-  // total value first, then least total spillover (proximity - stay on your own floor when it ties on value).
+  // Brute-force every floor assignment x Hacker choice (small search space, instant) and keep the
+  // best plan, in strict priority order:
+  //  1. Fulfill as many Buyer's Requests as physically possible - always takes priority.
+  //  2. Maximize total crew value.
+  //  3. Least total spillover (proximity - stay on your own floor when it ties on value).
   let best = null;
   const hackerCandidates = [null, ...Array.from({ length: playerCount }, (_, i) => i)];
   (function tryAssignments(prefix) {
     if (prefix.length === playerCount) {
       hackerCandidates.forEach(hackerIdx => {
+        // The Hacker avoids being home-assigned to Floor 3/Crisp when possible - they're stuck at
+        // the door, so Floor 3 items should only ever reach them as a genuine last-resort spillover.
+        if (hackerIdx !== null && prefix[hackerIdx] === 'f3crisp') return;
         const result = evaluatePlan(pool, playerCount, prefix, hackerIdx, validRequests);
         const better = !best
-          || result.totalValue > best.totalValue
-          || (result.totalValue === best.totalValue && result.totalSpillPct < best.totalSpillPct);
+          || result.fulfilledCount > best.fulfilledCount
+          || (result.fulfilledCount === best.fulfilledCount && result.totalValue > best.totalValue)
+          || (result.fulfilledCount === best.fulfilledCount && result.totalValue === best.totalValue && result.totalSpillPct < best.totalSpillPct);
         if (better) best = result;
       });
       return;
