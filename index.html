@@ -123,7 +123,7 @@ const LOOT_DATA = {
       { itemType: "Ring", itemName: "Coquard Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Ring", itemName: "Art Deco Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Ring", itemName: "Antique Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
-      { itemType: "Fertility Statue", itemName: "Ivory", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
+      { itemType: "Fertility Statue", itemName: "Ivory", valueMin: 49000, valueMax: 90000, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard royal", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard enchante", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
       { itemType: "Ornamental Egg", itemName: "Oeuf de Coquard decoratif", valueMin: 49000, valueMax: 63000, valueIncrement: null, bagWeightPercent: 20 },
@@ -348,6 +348,16 @@ const PLACEMENT_DEFAULT_ITEMS = {
   f3_painting_1: 'Cooked',
   crisp_painting_0: 'The Great Circle Back',
   crisp_painting_1: "Don't Forgo These Blueprints",
+  // Cases follow consistent spawns too. Within a case the exact variant is cosmetic - every
+  // Gemstone / Venus / Horse / Necklace / Skull shares one value range and bag weight - so
+  // these pick the right item TYPE and you only adjust the variant if you care about the name.
+  f1_case_0: 'Oeuf de Coquard royal',
+  f1_tall_0: 'Memento Non Mori (Emerald)',
+  f3_tall_0: 'Coquard Carcanet (Red Spinel)',
+  f3_tall_1: 'Silver Dapple Pinto',
+  crisp_case_1: 'Meteorite Fragment',
+  crisp_tall_0: 'Ruby',
+  crisp_tall_1: 'Gold',
 };
 
 function computeDefaultItemKeys() {
