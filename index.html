@@ -50,9 +50,13 @@
   .pl-check { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--muted); min-height:30px; cursor:pointer; flex:none; }
   .pl-remove { all:unset; cursor:pointer; font-size:11px; color:var(--muted2); min-height:30px; padding:0 4px; }
   select.item { width:100%; min-height:40px; padding:4px 8px; font-size:12.5px; border-radius:7px; }
-  .slider-row { display:flex; align-items:center; gap:10px; min-height:38px; }
-  .slider-row input[type=range] { flex:1; }
-  .slider-val { flex:none; width:64px; text-align:right; font-size:12.5px; font-variant-numeric:tabular-nums; }
+  .slider-row { display:flex; align-items:center; gap:7px; min-height:38px; }
+  .slider-row input[type=range] { flex:1; min-width:0; }
+  .slider-val { flex:none; width:60px; text-align:right; font-size:12.5px; font-variant-numeric:tabular-nums; }
+  .step-btn { flex:none; width:34px; height:34px; border-radius:8px; border:1px solid var(--line);
+              background:rgba(233,233,237,0.06); color:var(--text); font-size:17px; line-height:1;
+              cursor:pointer; touch-action:manipulation; -webkit-user-select:none; user-select:none; padding:0; }
+  .step-btn:active { background:var(--accent); color:#161826; }
   .buyer-label { display:flex; align-items:center; gap:6px; font-size:11.5px; color:rgba(233,233,237,0.75); min-height:28px; cursor:pointer; }
   .add-deposit { all:unset; cursor:pointer; font-size:12px; color:var(--accent); min-height:32px; }
   .note-box { font-size:11px; line-height:1.4; color:var(--muted); background:var(--card); border-radius:8px; padding:8px 10px; }
@@ -232,6 +236,12 @@ function kindTitle(kind, idx) {
   if (kind === 'depositbox') return `Deposit Box ${idx + 1}`;
   return `Crate`;
 }
+// Floor 2's paintings sit in two distinct clusters of three, so label them that way
+// rather than as a flat run of six.
+function placementTitle(sec, pl) {
+  if (sec.id === 'f2' && pl.kind === 'painting') return `Area ${pl.idx < 3 ? 1 : 2} - Painting ${(pl.idx % 3) + 1}`;
+  return kindTitle(pl.kind, pl.idx);
+}
 function mk(prefix, kind, count) {
   return Array.from({ length: Math.max(0, count) }, (_, i) => ({ id: `${prefix}_${kind}_${i}`, kind, idx: i }));
 }
@@ -321,12 +331,33 @@ function getDepositBoxes() {
   return state.depositBoxes || Array.from({ length: DEFAULTS.vaultDepositBoxes }, () => 7500);
 }
 
+// Paintings spawn in consistent spots run to run, so these placements pre-select the painting
+// that's actually there instead of making you pick it from a 14-item list every time.
+const PLACEMENT_DEFAULT_ITEMS = {
+  vault_painting_0: 'With Friends Like These',
+  vault_painting_1: 'Het Gouden Hondje',
+  vault_painting_2: 'Swingset Study No. LXIX',
+  vault_painting_3: 'The Hunter Becomes the Hunted',
+  f2_painting_0: 'The Chief',
+  f2_painting_1: 'Orange Crush',
+  f2_painting_2: 'Canis Hominem Edit',
+  f2_painting_3: 'La Duchesse',
+  f2_painting_4: 'Do You See Me',
+  f2_painting_5: 'Explain Yourself',
+  f3_painting_0: 'Sod Off',
+  f3_painting_1: 'Cooked',
+  crisp_painting_0: 'The Great Circle Back',
+  crisp_painting_1: "Don't Forgo These Blueprints",
+};
+
 function computeDefaultItemKeys() {
   const counters = {}; const map = {};
   getSections().forEach(sec => sec.placements.forEach(pl => {
     if (pl.kind === 'crate') return;
     const categoryId = KIND_TO_CATEGORY[pl.kind];
     const items = getCategory(categoryId).items;
+    const known = PLACEMENT_DEFAULT_ITEMS[pl.id];
+    if (known && items.some(it => it.itemName === known)) { map[pl.id] = known; return; }
     const idx = (counters[categoryId] || 0) % items.length;
     counters[categoryId] = (counters[categoryId] || 0) + 1;
     map[pl.id] = items[idx].itemName;
@@ -338,7 +369,10 @@ function buildPool() {
   const pool = [];
   const defaultItemKeys = computeDefaultItemKeys();
   getDepositBoxes().forEach((val, idx) => {
-    pool.push({ id: `vault_depositbox_${idx}`, pct: 5, value: val, categoryLabel: 'Deposit Box', lootType: 'Deposit Box', locationLabel: 'Vault', cluster: null, isCrisp: false, kind: 'depositbox' });
+    const dbId = `vault_depositbox_${idx}`;
+    const dbSlot = state.slots[dbId];
+    if (dbSlot && dbSlot.empty) return;
+    pool.push({ id: dbId, pct: 5, value: val, categoryLabel: 'Deposit Box', lootType: 'Deposit Box', locationLabel: 'Vault', cluster: null, isCrisp: false, kind: 'depositbox' });
   });
   getSections().forEach(sec => {
     if (sec.crew && state.playerCount < 2) return;
@@ -475,7 +509,16 @@ function setItemKey(id, categoryId, itemName) {
 }
 function setValue(id, val) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, value: val }; saveState(); }
 function addDepositBox() { const arr = getDepositBoxes(); state.depositBoxes = [...arr, 7500]; saveState(); render(); }
-function removeDepositBox(idx) { const arr = getDepositBoxes(); state.depositBoxes = arr.filter((_, i) => i !== idx); saveState(); render(); }
+function removeDepositBox(idx) {
+  const arr = getDepositBoxes();
+  // Deposit box slots are keyed by index, so removing one has to shift every later box's
+  // Empty flag down with it or the flags land on the wrong boxes.
+  const flags = arr.map((_, i) => !!(state.slots[`vault_depositbox_${i}`] || {}).empty).filter((_, i) => i !== idx);
+  arr.forEach((_, i) => { delete state.slots[`vault_depositbox_${i}`]; });
+  flags.forEach((isEmpty, i) => { if (isEmpty) state.slots[`vault_depositbox_${i}`] = { empty: true }; });
+  state.depositBoxes = arr.filter((_, i) => i !== idx);
+  saveState(); render();
+}
 function setDepositBoxValue(idx, val) { const arr = getDepositBoxes().slice(); arr[idx] = val; state.depositBoxes = arr; saveState(); }
 function toggleBuyerRequest(id) {
   const exists = state.buyerRequests.includes(id);
@@ -554,7 +597,7 @@ function renderItemsTab(pool, poolTotalValue) {
 
 function renderPlacement(pl, sec, defaultItemKeys) {
   const categoryId = KIND_TO_CATEGORY[pl.kind];
-  const title = kindTitle(pl.kind, pl.idx);
+  const title = placementTitle(sec, pl);
 
   if (pl.kind === 'crate') {
     const item = getCategory(categoryId).items[0];
@@ -607,18 +650,38 @@ function renderPlacement(pl, sec, defaultItemKeys) {
 
 function renderDepositBox(idx, val, showRemove) {
   const id = `vault_depositbox_${idx}`;
+  const empty = !!(state.slots[id] && state.slots[id].empty);
   let h = `<div class="placement"><div class="pl-head">
-    <div class="pl-title">Deposit Box ${idx + 1}<span class="pl-pct">5% bag</span></div>`;
+    <div class="pl-title">Deposit Box ${idx + 1}<span class="pl-pct">5% bag</span></div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <label class="pl-check"><input type="checkbox" data-act="empty" data-id="${id}" ${empty ? 'checked' : ''}/>Empty</label>`;
   if (showRemove) h += `<button class="pl-remove" data-act="remove-deposit" data-idx="${idx}">Remove</button>`;
-  h += `</div>` + sliderRow(id, 5000, 12500, 500, val, true) + `</div>`;
-  return h;
+  h += `</div></div>`;
+  if (!empty) h += sliderRow(id, 5000, 12500, 500, val, true);
+  return h + `</div>`;
 }
 
 function sliderRow(id, min, max, step, value, isDeposit) {
+  const idxAttr = isDeposit ? `data-idx="${id.replace('vault_depositbox_', '')}"` : '';
   return `<div class="slider-row">
+    <button class="step-btn" data-act="step" data-dir="-1" data-target="${esc(id)}" aria-label="Decrease">&minus;</button>
     <input type="range" min="${min}" max="${max}" step="${step}" value="${value}"
-      data-act="${isDeposit ? 'deposit-slide' : 'slide'}" data-id="${esc(id)}" ${isDeposit ? `data-idx="${id.replace('vault_depositbox_','')}"` : ''}/>
+      data-act="${isDeposit ? 'deposit-slide' : 'slide'}" data-id="${esc(id)}" ${idxAttr}/>
+    <button class="step-btn" data-act="step" data-dir="1" data-target="${esc(id)}" aria-label="Increase">+</button>
     <div class="slider-val" data-valfor="${esc(id)}">$${fmtK(value)}k</div></div>`;
+}
+
+// Nudges the range input and replays a normal input event so the existing slide handlers
+// (state write, label update, live pool total) all run unchanged.
+function stepSlider(targetId, dir) {
+  const input = bodyEl.querySelector(`input[type=range][data-id="${CSS.escape(targetId)}"]`);
+  if (!input) return;
+  const step = parseFloat(input.step) || 1;
+  const min = parseFloat(input.min), max = parseFloat(input.max);
+  const next = Math.min(max, Math.max(min, parseFloat(input.value) + dir * step));
+  if (next === parseFloat(input.value)) return;
+  input.value = next;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 function renderResultsTab(pool) {
@@ -628,6 +691,7 @@ function renderResultsTab(pool) {
     html += `<div class="note-box">Each player is auto-assigned one home floor (Floor 3 and Crisp Gallery count as one space) to cut down on backtracking, topping off from elsewhere only once their floor runs dry. Crisp Gallery needs someone to hold the door - that player gets none of its loot, chosen automatically for best total value.</div>`;
   }
   html += `<div class="hint">${state.buyerRequests.length}/3 Buyer's Requests selected (marked with * below) - auto-fulfilled by whichever player has room</div>`;
+  html += `<div class="hint">Picks maximize total cash, not item count or headline price - bag space is the real currency. Paintings look big but cost 50% of a bag, so they lose to smaller loot with a higher per-1% return (shown under each row).</div>`;
 
   players.forEach(p => {
     const rows = [
@@ -651,7 +715,7 @@ function renderResultsTab(pool) {
           <div class="res-line" style="color:${color}">
             <span>${esc(it.categoryLabel)}${it.isLocked ? ' *' : ''}</span>
             <span style="font-variant-numeric:tabular-nums">$${fmtK(it.value)}k - ${it.pct}%</span></div>
-          <div class="res-sub">${esc(it.locationLabel)} &middot; ${esc(it.lootType)}</div></div>`;
+          <div class="res-sub">${esc(it.locationLabel)} &middot; ${esc(it.lootType)} &middot; $${fmtK(Math.round(it.value / it.pct))}k per 1% bag</div></div>`;
       });
     } else {
       html += `<div class="empty-msg">Enter scouted items on the Loot Available tab to see a suggested fill.</div>`;
@@ -685,6 +749,7 @@ function attachListeners() {
     else if (act === 'empty') el.addEventListener('change', () => toggleEmpty(id));
     else if (act === 'item') el.addEventListener('change', e => setItemKey(id, el.dataset.cat, e.target.value));
     else if (act === 'buyer') el.addEventListener('change', () => toggleBuyerRequest(id));
+    else if (act === 'step') el.addEventListener('click', () => stepSlider(el.dataset.target, parseInt(el.dataset.dir, 10)));
     else if (act === 'add-deposit') el.addEventListener('click', addDepositBox);
     else if (act === 'remove-deposit') el.addEventListener('click', () => removeDepositBox(parseInt(el.dataset.idx, 10)));
     else if (act === 'slide') {
