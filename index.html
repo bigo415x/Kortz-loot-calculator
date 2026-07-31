@@ -122,7 +122,7 @@ const LOOT_DATA = {
       { itemType: "Bracelet", itemName: "Art Deco Circlets", valueMin: 42000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Bracelet", itemName: "Coquard Bracelets", valueMin: 32000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Bracelet", itemName: "Pharaonic Bangles", valueMin: 29000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
-      { itemType: "Bracelet", itemName: "Byzantine Hoops", valueMin: 32000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
+      { itemType: "Bracelet", itemName: "Byzantine Hoops", valueMin: 30000, valueMax: 53000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Bracelet", itemName: "Antique Bands", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Ring", itemName: "Coquard Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
       { itemType: "Ring", itemName: "Art Deco Rings", valueMin: 28000, valueMax: 35000, valueIncrement: 1000, bagWeightPercent: 10 },
@@ -199,10 +199,10 @@ const KIND_TO_LOOT_TYPE = { case: 'Small Glass Case', tall: 'Tall Glass Case', p
 const MAX_BUYER_REQUESTS = 3;
 const BUYER_REQUEST_BONUS = 50000;
 
-// Floor 3 and Crisp Gallery are physically adjacent and treated as one assignable "space".
+// Upper Gallery and Crisp Gallery are physically adjacent and treated as one assignable "space".
 // Vault and Garage are passed through by everyone, so they're not assignable - any player can draw from them.
 const CLUSTER_OF_SECTION = { f1: 'f1', f2: 'f2', f3: 'f3crisp', crisp: 'f3crisp', vault: null, garage: null };
-const CLUSTER_LABEL = { f1: 'Floor 1', f2: 'Floor 2', f3crisp: 'Floor 3 / Crisp Gallery' };
+const CLUSTER_LABEL = { f1: 'Lower Gallery - Back Exit', f2: 'Lower Gallery', f3crisp: 'Upper Gallery / Crisp Gallery' };
 const ASSIGNABLE_CLUSTERS = ['f1', 'f2', 'f3crisp'];
 const KIND_PROXIMITY_ORDER = { painting: 0, tall: 1, case: 2, crate: 3, depositbox: 4 };
 
@@ -240,7 +240,7 @@ function kindTitle(kind, idx) {
   if (kind === 'depositbox') return `Deposit Box ${idx + 1}`;
   return `Crate`;
 }
-// Floor 2's paintings sit in two distinct clusters of three, so label them that way
+// The Lower Gallery's paintings sit in two distinct clusters of three, so label them that way
 // rather than as a flat run of six.
 function placementTitle(sec, pl) {
   if (sec.id === 'f2' && pl.kind === 'painting') return `Area ${pl.idx < 3 ? 1 : 2} - Painting ${(pl.idx % 3) + 1}`;
@@ -325,10 +325,10 @@ function getSections() {
   return [
     { id: 'vault', label: 'Vault', crew: false, note: 'Deposit boxes are low value — usually skip unless space is spare', placements: mk('vault', 'painting', p.vaultPaintings) },
     { id: 'garage', label: 'Garage', crew: false, placements: mk('garage', 'crate', 1) },
-    { id: 'f1', label: 'Floor 1', crew: false, placements: [...mk('f1', 'case', p.floor1SmallCases), ...mk('f1', 'tall', p.floor1TallCases)] },
-    { id: 'f2', label: 'Floor 2', crew: false, placements: [...mk('f2', 'painting', p.floor2Paintings), ...mk('f2', 'case', p.floor2SmallCases)] },
-    { id: 'f3', label: 'Floor 3', crew: false, note: 'Tall cases require Glass Cutter prep', placements: [...mk('f3', 'painting', p.floor3Paintings), ...mk('f3', 'case', p.floor3SmallCases), ...mk('f3', 'tall', p.floor3TallCases)] },
-    { id: 'crisp', label: 'Crisp Gallery — 3rd floor (needs 2+ players)', crew: true, placements: [...mk('crisp', 'painting', p.crispGalleryPaintings), ...mk('crisp', 'case', p.crispGallerySmallCases), ...mk('crisp', 'tall', p.crispGalleryTallCases)] },
+    { id: 'f1', label: 'Lower Gallery - Back Exit', crew: false, placements: [...mk('f1', 'case', p.floor1SmallCases), ...mk('f1', 'tall', p.floor1TallCases)] },
+    { id: 'f2', label: 'Lower Gallery', crew: false, placements: [...mk('f2', 'painting', p.floor2Paintings), ...mk('f2', 'case', p.floor2SmallCases)] },
+    { id: 'f3', label: 'Upper Gallery', crew: false, note: 'Tall cases require Glass Cutter prep', placements: [...mk('f3', 'painting', p.floor3Paintings), ...mk('f3', 'case', p.floor3SmallCases), ...mk('f3', 'tall', p.floor3TallCases)] },
+    { id: 'crisp', label: 'Crisp Gallery', crew: true, placements: [...mk('crisp', 'painting', p.crispGalleryPaintings), ...mk('crisp', 'case', p.crispGallerySmallCases), ...mk('crisp', 'tall', p.crispGalleryTallCases)] },
   ];
 }
 
@@ -493,8 +493,8 @@ function computeCrewPlan(pool, playerCount, buyerRequestIds) {
   (function tryAssignments(prefix) {
     if (prefix.length === playerCount) {
       hackerCandidates.forEach(hackerIdx => {
-        // The Hacker avoids being home-assigned to Floor 3/Crisp when possible - they're stuck at
-        // the door, so Floor 3 items should only ever reach them as a genuine last-resort spillover.
+        // The Hacker avoids being home-assigned to the Upper/Crisp space when possible - they're
+        // stuck at the door, so those items only reach them as a genuine last-resort spillover.
         if (hackerIdx !== null && prefix[hackerIdx] === 'f3crisp') return;
         const result = evaluatePlan(pool, playerCount, prefix, hackerIdx, validRequests);
         const better = !best
@@ -569,12 +569,16 @@ function renderItemsTab(pool, poolTotalValue) {
   const depositBoxes = getDepositBoxes();
   let html = `<div class="hint">${pool.length} items in play - $${fmtK(poolTotalValue)}k total pool value</div>`;
 
-  getSections().filter(sec => !sec.crew || state.playerCount >= 2).forEach(sec => {
+  // Every section is always listed - you scope the Crisp Gallery on setup missions regardless of
+  // crew size, so its values are always worth recording. Player count only gates the Results tab.
+  getSections().forEach(sec => {
     const collapsed = !!state.collapsed[sec.id];
+    const lockedOut = sec.crew && state.playerCount < 2;
     html += `<div class="card"><button class="sec-toggle" data-act="collapse" data-id="${sec.id}">
       <span class="sec-label">${esc(sec.label)}</span>
       <span class="sec-chevron">${collapsed ? '▸ show' : '▾ hide'}</span></button>`;
     if (!collapsed) {
+      if (lockedOut) html += `<div class="sec-note">Needs 2+ players - values save, but stay out of solo results</div>`;
       if (sec.note) html += `<div class="sec-note">${esc(sec.note)}</div>`;
       const kindGroups = groupPlacementsByKind(sec.placements);
       const isVault = sec.id === 'vault';
@@ -704,7 +708,7 @@ function renderResultsTab(pool) {
   const { players, bonusActive, totalValue } = computeCrewPlan(pool, state.playerCount, state.buyerRequests);
   let html = '';
   if (state.playerCount > 1) {
-    html += `<div class="note-box">Each player is auto-assigned one home floor (Floor 3 and Crisp Gallery count as one space) to cut down on backtracking, topping off from elsewhere only once their floor runs dry. Crisp Gallery needs someone to hold the door - that player gets none of its loot, chosen automatically for best total value.</div>`;
+    html += `<div class="note-box">Each player is auto-assigned one home area (the Upper Gallery and Crisp Gallery count as one space) to cut down on backtracking, topping off from elsewhere only once their area runs dry. Crisp Gallery needs someone to hold the door - that player gets none of its loot, chosen automatically for best total value.</div>`;
   }
   html += `<div class="hint">${state.buyerRequests.length}/3 Buyer's Requests selected (marked with * below) - auto-fulfilled by whichever player has room</div>`;
   html += `<div class="hint">Picks maximize total cash, not item count or headline price - bag space is the real currency. Paintings look big but cost 50% of a bag, so they lose to smaller loot with a higher per-1% return (shown under each row).</div>`;
