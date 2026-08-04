@@ -25,7 +25,7 @@
   .reset { flex:none; min-height:36px; padding:0 12px; border-radius:8px; border:1px solid var(--line);
            background:transparent; color:var(--text); font-size:12px; cursor:pointer; }
   .players-label { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); }
-  select.players, select.item { color:var(--text); background:var(--bg); border:1px solid var(--line); }
+  select.players { color:var(--text); background:var(--bg); border:1px solid var(--line); }
   select.players { flex:1; min-height:38px; padding:4px 10px; font-size:13px; border-radius:8px; }
   .tabs { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
   .tab { flex:1; min-height:40px; padding:6px 10px; font-size:13px; border:none; cursor:pointer;
@@ -42,22 +42,41 @@
   .subgroup { display:flex; flex-direction:column; gap:4px; background:rgba(233,233,237,0.04); border-radius:6px; padding:2px 8px; }
   .sub-toggle { all:unset; cursor:pointer; display:flex; align-items:center; justify-content:space-between; min-height:32px; }
   .sub-label { font-size:12.5px; font-weight:500; color:rgba(233,233,237,0.85); }
-  .placement { display:flex; flex-direction:column; gap:6px; padding:6px 0; border-bottom:1px solid var(--line-soft); }
+  .placement { display:flex; flex-direction:column; gap:2px; padding:4px 0; border-bottom:1px solid var(--line-soft); }
   .placement:last-child { border-bottom:none; }
-  .pl-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-  .pl-title { font-size:12.5px; font-weight:500; }
-  .pl-pct { font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:var(--accent); margin-left:6px; }
-  .pl-check { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--muted); min-height:30px; cursor:pointer; flex:none; }
+  .pl-row { display:flex; align-items:center; gap:6px; min-height:32px; }
+  /* The item name doubles as the picker: a transparent native <select> sits on top of it, so one
+     tap opens the phone's own wheel/list instead of a custom in-page menu. It stretches to the full
+     row height - left to size on its text alone the tap target collapses to ~19px. */
+  .pl-pick { position:relative; flex:1; min-width:0; display:flex; align-items:center; gap:5px;
+             align-self:stretch; min-height:32px; }
+  .pl-pick select { position:absolute; inset:0; width:100%; height:100%; opacity:0; border:none;
+                    background:transparent; font-size:16px; }
+  .pl-num { flex:none; min-width:23px; height:19px; padding:0 4px; border-radius:5px; font-size:10.5px;
+            font-weight:600; display:flex; align-items:center; justify-content:center;
+            background:rgba(145,132,217,0.2); color:var(--accent); font-variant-numeric:tabular-nums; }
+  .pl-name { flex:1; min-width:0; font-size:12.5px; font-weight:500;
+             white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pl-caret { flex:none; font-size:8px; color:var(--muted2); }
+  .pl-pct { flex:none; font-size:10.5px; color:var(--muted2); font-variant-numeric:tabular-nums; }
   .pl-remove { all:unset; cursor:pointer; font-size:11px; color:var(--muted2); min-height:30px; padding:0 4px; }
-  select.item { width:100%; min-height:40px; padding:4px 8px; font-size:12.5px; border-radius:7px; }
-  .slider-row { display:flex; align-items:center; gap:7px; min-height:38px; }
+  .chip { flex:none; min-height:28px; padding:0 8px; border-radius:7px; border:1px solid var(--line);
+          background:transparent; color:var(--muted); font-size:10.5px; cursor:pointer;
+          touch-action:manipulation; -webkit-user-select:none; user-select:none; }
+  .chip.on { background:var(--accent); border-color:var(--accent); color:#161826; font-weight:600; }
+  .chip.dim { opacity:0.35; }
+  .slider-row { display:flex; align-items:center; gap:6px; min-height:36px; }
   .slider-row input[type=range] { flex:1; min-width:0; }
-  .slider-val { flex:none; width:60px; text-align:right; font-size:12.5px; font-variant-numeric:tabular-nums; }
+  /* 16px keeps iOS from zooming the page when this gets focus. */
+  .val-input { flex:none; width:62px; text-align:right; font-size:16px; font-variant-numeric:tabular-nums;
+               background:transparent; border:1px solid transparent; border-radius:6px; color:var(--text);
+               padding:3px 3px; min-height:32px; font-family:inherit; }
+  .val-input:focus { border-color:var(--accent); background:rgba(0,0,0,0.25); outline:none; }
+  .val-k { flex:none; font-size:11px; color:var(--muted2); margin-left:-3px; }
   .step-btn { flex:none; width:34px; height:34px; border-radius:8px; border:1px solid var(--line);
               background:rgba(233,233,237,0.06); color:var(--text); font-size:17px; line-height:1;
               cursor:pointer; touch-action:manipulation; -webkit-user-select:none; user-select:none; padding:0; }
   .step-btn:active { background:var(--accent); color:#161826; }
-  .buyer-label { display:flex; align-items:center; gap:6px; font-size:11.5px; color:rgba(233,233,237,0.75); min-height:28px; cursor:pointer; }
   .add-deposit { all:unset; cursor:pointer; font-size:12px; color:var(--accent); min-height:32px; }
   .note-box { font-size:11px; line-height:1.4; color:var(--muted); background:var(--card); border-radius:8px; padding:8px 10px; }
   .p-head { display:flex; align-items:center; justify-content:space-between; }
@@ -107,7 +126,8 @@
   </div>
   <div class="body" id="body"></div>
   <div class="footer">
-    GTA Online - The Kortz Center Heist. Bag %s &amp; value ranges are community estimates; drag sliders to match your scouted run.<br>
+    GTA Online - The Kortz Center Heist. Spot numbers, spawn contents, bag %s &amp; value ranges are community data;
+    correct anything your scouted run disagrees with.<br>
     Your entries auto-save to this browser/device - Reset clears them for good.
   </div>
 </div>
@@ -214,12 +234,17 @@ function groupByType(items) {
   items.forEach(it => { if (!map[it.itemType]) { map[it.itemType] = []; order.push(it.itemType); } map[it.itemType].push(it); });
   return order.map(t => ({ itemType: t, items: map[t] }));
 }
-function groupPlacementsByKind(placements) {
+// Placements group by `pl.group` when set, falling back to kind - that lets the Lower Gallery's two
+// separate painting clusters collapse independently instead of reading as one run of six.
+function groupPlacements(placements) {
   const order = []; const map = {};
-  placements.forEach(pl => { if (!map[pl.kind]) { map[pl.kind] = []; order.push(pl.kind); } map[pl.kind].push(pl); });
-  return order.map(k => ({ kind: k, placements: map[k] }));
+  placements.forEach(pl => { const g = pl.group || pl.kind; if (!map[g]) { map[g] = []; order.push(g); } map[g].push(pl); });
+  return order.map(g => ({ group: g, kind: map[g][0].kind, placements: map[g] }));
 }
-const KIND_GROUP_LABEL = { case: 'Small Cases', tall: 'Tall Cases', painting: 'Paintings', crate: 'Truck Crate', depositbox: 'Deposit Boxes' };
+const GROUP_LABEL = { case: 'Small Cases', tall: 'Tall Cases', painting: 'Paintings', crate: 'Truck Crate',
+                      depositbox: 'Deposit Boxes', painting_a: 'Paintings - Area 1', painting_b: 'Paintings - Area 2' };
+// What each case type needs before you can open it, per the community map's legend.
+const KIND_REQUIREMENT = { case: 'alarm disabled', tall: 'plasma cutter' };
 function itemMid(item) {
   const step = item.valueIncrement || 500;
   const raw = (item.valueMin + item.valueMax) / 2;
@@ -233,18 +258,12 @@ function itemDisplayLabel(item) {
   if (nameLower.includes(typeLower)) return item.itemName;
   return `${item.itemType} — ${item.itemName}`;
 }
-function kindTitle(kind, idx) {
-  if (kind === 'case') return `Small Case ${idx + 1}`;
-  if (kind === 'tall') return `Tall Case ${idx + 1}`;
-  if (kind === 'painting') return `Painting ${idx + 1}`;
-  if (kind === 'depositbox') return `Deposit Box ${idx + 1}`;
-  return `Crate`;
-}
-// The Lower Gallery's paintings sit in two distinct clusters of three, so label them that way
-// rather than as a flat run of six.
-function placementTitle(sec, pl) {
-  if (sec.id === 'f2' && pl.kind === 'painting') return `Area ${pl.idx < 3 ? 1 : 2} - Painting ${(pl.idx % 3) + 1}`;
-  return kindTitle(pl.kind, pl.idx);
+// These types name a material or a stone rather than the piece itself, so "Ivory" or "Ruby" on its
+// own doesn't tell you what you're looking at - they keep the type in front. Every other type has a
+// distinctive name ("Sod Off", "Byzantine Hoops") where the prefix would just eat phone row width.
+const TYPE_LED_NAMES = ['Fertility Statue', 'Venus Statue', 'Gemstone'];
+function shortLabel(item) {
+  return TYPE_LED_NAMES.includes(item.itemType) ? `${item.itemType} — ${item.itemName}` : item.itemName;
 }
 function mk(prefix, kind, count) {
   return Array.from({ length: Math.max(0, count) }, (_, i) => ({ id: `${prefix}_${kind}_${i}`, kind, idx: i }));
@@ -322,13 +341,16 @@ const DEFAULTS = {
 
 function getSections() {
   const p = DEFAULTS;
+  // The Lower Gallery's six paintings sit as two clusters of three at opposite ends of the hall.
+  const f2Paintings = mk('f2', 'painting', p.floor2Paintings)
+    .map(pl => ({ ...pl, group: pl.idx < 3 ? 'painting_a' : 'painting_b' }));
   return [
     { id: 'vault', label: 'Vault', crew: false, note: 'Deposit boxes are low value — usually skip unless space is spare', placements: mk('vault', 'painting', p.vaultPaintings) },
     { id: 'garage', label: 'Garage', crew: false, placements: mk('garage', 'crate', 1) },
     { id: 'f1', label: 'Lower Gallery - Back Exit', crew: false, placements: [...mk('f1', 'case', p.floor1SmallCases), ...mk('f1', 'tall', p.floor1TallCases)] },
-    { id: 'f2', label: 'Lower Gallery', crew: false, placements: [...mk('f2', 'painting', p.floor2Paintings), ...mk('f2', 'case', p.floor2SmallCases)] },
-    { id: 'f3', label: 'Upper Gallery', crew: false, note: 'Tall cases require Glass Cutter prep', placements: [...mk('f3', 'painting', p.floor3Paintings), ...mk('f3', 'case', p.floor3SmallCases), ...mk('f3', 'tall', p.floor3TallCases)] },
-    { id: 'crisp', label: 'Crisp Gallery', crew: true, placements: [...mk('crisp', 'painting', p.crispGalleryPaintings), ...mk('crisp', 'case', p.crispGallerySmallCases), ...mk('crisp', 'tall', p.crispGalleryTallCases)] },
+    { id: 'f2', label: 'Lower Gallery', crew: false, placements: [...f2Paintings, ...mk('f2', 'case', p.floor2SmallCases)] },
+    { id: 'f3', label: 'Upper Gallery', crew: false, placements: [...mk('f3', 'painting', p.floor3Paintings), ...mk('f3', 'case', p.floor3SmallCases), ...mk('f3', 'tall', p.floor3TallCases)] },
+    { id: 'crisp', label: 'Crisp Gallery', crew: true, note: 'Marked as the 2-player area on the spawn map', placements: [...mk('crisp', 'painting', p.crispGalleryPaintings), ...mk('crisp', 'case', p.crispGallerySmallCases), ...mk('crisp', 'tall', p.crispGalleryTallCases)] },
   ];
 }
 
@@ -336,33 +358,53 @@ function getDepositBoxes() {
   return state.depositBoxes || Array.from({ length: DEFAULTS.vaultDepositBoxes }, () => 7500);
 }
 
-// Paintings spawn in consistent spots run to run, so these placements pre-select the painting
-// that's actually there instead of making you pick it from a 14-item list every time.
-const PLACEMENT_DEFAULT_ITEMS = {
-  vault_painting_0: 'With Friends Like These',
-  vault_painting_1: 'Het Gouden Hondje',
-  vault_painting_2: 'Swingset Study No. LXIX',
-  vault_painting_3: 'The Hunter Becomes the Hunted',
-  f2_painting_0: 'The Chief',
-  f2_painting_1: 'Orange Crush',
-  f2_painting_2: 'Canis Hominem Edit',
-  f2_painting_3: 'La Duchesse',
-  f2_painting_4: 'Do You See Me',
-  f2_painting_5: 'Explain Yourself',
-  f3_painting_0: 'Sod Off',
-  f3_painting_1: 'Cooked',
-  crisp_painting_0: 'The Great Circle Back',
-  crisp_painting_1: "Don't Forgo These Blueprints",
-  // Cases follow consistent spawns too. Within a case the exact variant is cosmetic - every
-  // Gemstone / Venus / Horse / Necklace / Skull shares one value range and bag weight - so
-  // these pick the right item TYPE and you only adjust the variant if you care about the name.
-  f1_case_0: 'Oeuf de Coquard royal',
-  f1_tall_0: 'Memento Non Mori (Emerald)',
-  f3_tall_0: 'Coquard Carcanet (Red Spinel)',
-  f3_tall_1: 'Silver Dapple Pinto',
-  crisp_case_1: 'Meteorite Fragment',
-  crisp_tall_0: 'Ruby',
-  crisp_tall_1: 'Gold',
+// Every loot spot in the Kortz Center is fixed run to run: spot #14 is always a bracelet case,
+// spot #19 is always the same painting. This table is that spawn map - `n` is the spot's number on
+// the community map so the number on your phone matches the number you're reading off the map, and
+// `item` is what actually spawns there, so nothing needs picking from a 29-item list by default.
+//
+// Where the game varies the variant but not the money, the variant here is just a placeholder:
+// every Gemstone / Venus / Horse / Necklace / Skull shares one value range and bag weight, so the
+// name is cosmetic. Fertility Statues are the exception - Ivory/Gold/Silver/Mahogany/Bronze really
+// do pay differently, so #12 and #20 are worth correcting to the material you actually see.
+const SPOTS = {
+  // Upper Gallery
+  f3_painting_0:    { n: 1,  item: 'Sod Off' },
+  f3_painting_1:    { n: 2,  item: 'Cooked' },
+  f3_case_0:        { n: 3,  item: 'Oeuf de Coquard royal' },
+  f3_tall_0:        { n: 4,  item: 'Coquard Carcanet (Red Spinel)' },
+  f3_tall_1:        { n: 5,  item: 'Silver Dapple Pinto' },
+  f3_case_1:        { n: 6,  item: 'Coquard Bracelets' },
+  // Crisp Gallery - the 2-player area
+  crisp_case_0:     { n: 7,  item: 'Art Deco Circlets' },
+  crisp_tall_0:     { n: 8,  item: 'Gold' },                 // Venus Statue
+  crisp_painting_0: { n: 9,  item: 'The Great Circle Back' },
+  crisp_case_1:     { n: 10, item: 'Meteorite Fragment' },
+  crisp_tall_1:     { n: 11, item: 'Ruby' },                 // Gemstone
+  crisp_case_2:     { n: 12, item: 'Ivory' },                // Fertility Statue - check the material
+  crisp_painting_1: { n: 13, item: "Don't Forgo These Blueprints" },
+  // Lower Gallery
+  f2_case_0:        { n: 14, item: 'Antique Rings' },
+  f2_painting_0:    { n: 15, item: 'Orange Crush' },
+  f2_painting_1:    { n: 16, item: 'Canis Hominem Edit' },
+  f2_case_1:        { n: 17, item: 'Art Deco Rings' },
+  f2_case_2:        { n: 18, item: 'Antique Bands' },
+  f2_painting_2:    { n: 19, item: 'The Chief' },
+  f2_case_3:        { n: 20, item: 'Ivory' },                // Fertility Statue - check the material
+  f2_painting_3:    { n: 21, item: 'Do You See Me' },
+  f2_case_4:        { n: 22, item: 'Coquard Rings' },
+  f2_painting_4:    { n: 23, item: 'Explain Yourself' },
+  f2_painting_5:    { n: 24, item: 'La Duchesse' },
+  f2_case_5:        { n: 25, item: 'Pharaonic Bangles' },
+  // Lower Gallery - Back Exit
+  f1_case_0:        { n: 26, item: 'Byzantine Hoops' },
+  f1_case_1:        { n: 27, item: 'Oeuf de Coquard royal' },
+  f1_tall_0:        { n: 28, item: 'Memento Non Mori (Emerald)' },
+  // Vault
+  vault_painting_0: { n: 29, item: 'With Friends Like These' },
+  vault_painting_1: { n: 30, item: 'Het Gouden Hondje' },
+  vault_painting_2: { n: 31, item: 'Swingset Study No. LXIX' },
+  vault_painting_3: { n: 32, item: 'The Hunter Becomes the Hunted' },
 };
 
 function computeDefaultItemKeys() {
@@ -371,7 +413,7 @@ function computeDefaultItemKeys() {
     if (pl.kind === 'crate') return;
     const categoryId = KIND_TO_CATEGORY[pl.kind];
     const items = getCategory(categoryId).items;
-    const known = PLACEMENT_DEFAULT_ITEMS[pl.id];
+    const known = SPOTS[pl.id] && SPOTS[pl.id].item;
     if (known && items.some(it => it.itemName === known)) { map[pl.id] = known; return; }
     const idx = (counters[categoryId] || 0) % items.length;
     counters[categoryId] = (counters[categoryId] || 0) + 1;
@@ -567,7 +609,8 @@ function render() {
 function renderItemsTab(pool, poolTotalValue) {
   const defaultItemKeys = computeDefaultItemKeys();
   const depositBoxes = getDepositBoxes();
-  let html = `<div class="hint">${pool.length} items in play - $${fmtK(poolTotalValue)}k total pool value</div>`;
+  let html = `<div class="hint">${pool.length} items in play - $${fmtK(poolTotalValue)}k total pool value</div>
+    <div class="hint">Numbers match the community spawn map. Each spot is pre-set to what normally spawns there - tap an item name to change it, tap its value to type an exact number, ★ marks a Buyer's Request.</div>`;
 
   // Every section is always listed - you scope the Crisp Gallery on setup missions regardless of
   // crew size, so its values are always worth recording. Player count only gates the Results tab.
@@ -580,16 +623,17 @@ function renderItemsTab(pool, poolTotalValue) {
     if (!collapsed) {
       if (lockedOut) html += `<div class="sec-note">Needs 2+ players - values save, but stay out of solo results</div>`;
       if (sec.note) html += `<div class="sec-note">${esc(sec.note)}</div>`;
-      const kindGroups = groupPlacementsByKind(sec.placements);
+      const groups = groupPlacements(sec.placements);
       const isVault = sec.id === 'vault';
-      const nestByKind = kindGroups.length > 1 || isVault;
+      const nestByKind = groups.length > 1 || isVault;
 
       if (nestByKind) {
-        kindGroups.forEach(g => {
-          const subId = `${sec.id}::${g.kind}`;
+        groups.forEach(g => {
+          const subId = `${sec.id}::${g.group}`;
           const subCollapsed = !!state.collapsed[subId];
+          const req = KIND_REQUIREMENT[g.kind] ? ` &middot; ${KIND_REQUIREMENT[g.kind]}` : '';
           html += `<div class="subgroup"><button class="sub-toggle" data-act="collapse" data-id="${subId}">
-            <span class="sub-label">${esc(KIND_GROUP_LABEL[g.kind])} (${g.placements.length})</span>
+            <span class="sub-label">${esc(GROUP_LABEL[g.group])} (${g.placements.length})${req}</span>
             <span class="sec-chevron">${subCollapsed ? '▸ show' : '▾ hide'}</span></button>`;
           if (!subCollapsed) { g.placements.forEach(pl => { html += renderPlacement(pl, sec, defaultItemKeys); }); }
           html += `</div>`;
@@ -598,7 +642,7 @@ function renderItemsTab(pool, poolTotalValue) {
           const subId = `${sec.id}::depositbox`;
           const subCollapsed = !!state.collapsed[subId];
           html += `<div class="subgroup"><button class="sub-toggle" data-act="collapse" data-id="${subId}">
-            <span class="sub-label">${esc(KIND_GROUP_LABEL.depositbox)} (${depositBoxes.length})</span>
+            <span class="sub-label">${esc(GROUP_LABEL.depositbox)} (${depositBoxes.length})</span>
             <span class="sec-chevron">${subCollapsed ? '▸ show' : '▾ hide'}</span></button>`;
           if (!subCollapsed) {
             depositBoxes.forEach((val, idx) => { html += renderDepositBox(idx, val, depositBoxes.length > 1); });
@@ -615,21 +659,23 @@ function renderItemsTab(pool, poolTotalValue) {
   return html;
 }
 
+// One placement is two rows: the spot number + what's in it (tap to change), then the value
+// (drag, nudge, or type). Nothing that isn't needed every run gets a row of its own.
 function renderPlacement(pl, sec, defaultItemKeys) {
   const categoryId = KIND_TO_CATEGORY[pl.kind];
-  const title = placementTitle(sec, pl);
+  const spotNum = SPOTS[pl.id] ? SPOTS[pl.id].n : null;
+  const numBadge = spotNum ? `<span class="pl-num">${spotNum}</span>` : '';
 
   if (pl.kind === 'crate') {
     const item = getCategory(categoryId).items[0];
     const slot = state.slots[pl.id] || {};
     const skip = !!slot.skip;
     const value = slot.value !== undefined ? slot.value : item.valueMin;
-    let h = `<div class="placement"><div class="pl-head">
-      <div class="pl-title">${esc(title)}<span class="pl-pct">${item.bagWeightPercent}% bag</span></div>
-      <label class="pl-check"><input type="checkbox" data-act="skip" data-id="${pl.id}" ${skip ? 'checked' : ''}/>Skip</label></div>`;
-    if (!skip) {
-      h += sliderRow(pl.id, item.valueMin, item.valueMax, item.valueIncrement || 5000, value);
-    }
+    let h = `<div class="placement"><div class="pl-row">
+      <div class="pl-pick"><span class="pl-name">${esc(item.itemName)}</span></div>
+      <span class="pl-pct">${item.bagWeightPercent}%</span>
+      <button class="chip${skip ? ' on' : ''}" data-act="skip" data-id="${pl.id}">Skip</button></div>`;
+    if (!skip) h += valueRow(pl.id, item.valueMin, item.valueMax, item.valueIncrement || 5000, value);
     return h + `</div>`;
   }
 
@@ -643,52 +689,61 @@ function renderPlacement(pl, sec, defaultItemKeys) {
   const isBuyerRequest = state.buyerRequests.includes(pl.id);
   const buyerFull = state.buyerRequests.length >= MAX_BUYER_REQUESTS && !isBuyerRequest;
 
-  let h = `<div class="placement"><div class="pl-head">
-    <div class="pl-title">${esc(title)}<span class="pl-pct">${item.bagWeightPercent}% bag</span></div>
-    <label class="pl-check"><input type="checkbox" data-act="empty" data-id="${pl.id}" ${empty ? 'checked' : ''}/>Empty</label></div>`;
-
-  if (!empty) {
-    // item select with optgroups
-    let opts = '';
-    groupByType(cat.items).forEach(g => {
-      opts += `<optgroup label="${esc(g.itemType)}">`;
-      g.items.forEach(it => {
-        const sel = it.itemName === itemKey ? 'selected' : '';
-        opts += `<option value="${esc(it.itemName)}" ${sel}>${esc(itemDisplayLabel(it))} — ${it.bagWeightPercent}%</option>`;
-      });
-      opts += `</optgroup>`;
+  let opts = '';
+  groupByType(cat.items).forEach(g => {
+    opts += `<optgroup label="${esc(g.itemType)}">`;
+    g.items.forEach(it => {
+      const sel = it.itemName === itemKey ? 'selected' : '';
+      opts += `<option value="${esc(it.itemName)}" ${sel}>${esc(itemDisplayLabel(it))} — ${it.bagWeightPercent}%</option>`;
     });
-    h += `<select class="item" data-act="item" data-id="${pl.id}" data-cat="${categoryId}">${opts}</select>`;
-    h += sliderRow(pl.id, item.valueMin, item.valueMax, item.valueIncrement || 500, value);
+    opts += `</optgroup>`;
+  });
 
-    // buyer's request (heist-wide - the crew auto-decides who ends up carrying it)
-    h += `<label class="buyer-label" style="opacity:${buyerFull ? 0.4 : 1}">
-      <input type="checkbox" data-act="buyer" data-id="${pl.id}" ${isBuyerRequest ? 'checked' : ''}/>Buyer's Request</label>`;
+  let h = `<div class="placement"><div class="pl-row">
+    <div class="pl-pick">${numBadge}
+      <span class="pl-name" style="opacity:${empty ? 0.4 : 1}">${esc(shortLabel(item))}</span>
+      <span class="pl-caret">▼</span>
+      <select data-act="item" data-id="${pl.id}" data-cat="${categoryId}"
+        aria-label="Item at spot ${spotNum || ''}">${opts}</select>
+    </div>
+    <span class="pl-pct">${item.bagWeightPercent}%</span>
+    <button class="chip${empty ? ' on' : ''}" data-act="empty" data-id="${pl.id}">Empty</button>`;
+  // Buyer's Requests are heist-wide - the crew auto-decides who ends up carrying it.
+  if (!empty) {
+    h += `<button class="chip${isBuyerRequest ? ' on' : ''}${buyerFull ? ' dim' : ''}" data-act="buyer"
+      data-id="${pl.id}" aria-label="Buyer's Request">★</button>`;
   }
+  h += `</div>`;
+
+  if (!empty) h += valueRow(pl.id, item.valueMin, item.valueMax, item.valueIncrement || 500, value);
   return h + `</div>`;
 }
 
 function renderDepositBox(idx, val, showRemove) {
   const id = `vault_depositbox_${idx}`;
   const empty = !!(state.slots[id] && state.slots[id].empty);
-  let h = `<div class="placement"><div class="pl-head">
-    <div class="pl-title">Deposit Box ${idx + 1}<span class="pl-pct">5% bag</span></div>
-    <div style="display:flex;align-items:center;gap:6px">
-      <label class="pl-check"><input type="checkbox" data-act="empty" data-id="${id}" ${empty ? 'checked' : ''}/>Empty</label>`;
+  let h = `<div class="placement"><div class="pl-row">
+    <div class="pl-pick"><span class="pl-name" style="opacity:${empty ? 0.4 : 1}">Deposit Box ${idx + 1}</span></div>
+    <span class="pl-pct">5%</span>
+    <button class="chip${empty ? ' on' : ''}" data-act="empty" data-id="${id}">Empty</button>`;
   if (showRemove) h += `<button class="pl-remove" data-act="remove-deposit" data-idx="${idx}">Remove</button>`;
-  h += `</div></div>`;
-  if (!empty) h += sliderRow(id, 5000, 12500, 500, val, true);
+  h += `</div>`;
+  if (!empty) h += valueRow(id, 5000, 12500, 500, val, true);
   return h + `</div>`;
 }
 
-function sliderRow(id, min, max, step, value, isDeposit) {
+// The typed field carries thousands ("41.5" = $41.5k) because that's how the values read in game,
+// and it's a single tap + two keystrokes instead of hunting for an exact stop on a phone-width slider.
+function valueRow(id, min, max, step, value, isDeposit) {
   const idxAttr = isDeposit ? `data-idx="${id.replace('vault_depositbox_', '')}"` : '';
   return `<div class="slider-row">
     <button class="step-btn" data-act="step" data-dir="-1" data-target="${esc(id)}" aria-label="Decrease">&minus;</button>
     <input type="range" min="${min}" max="${max}" step="${step}" value="${value}"
       data-act="${isDeposit ? 'deposit-slide' : 'slide'}" data-id="${esc(id)}" ${idxAttr}/>
     <button class="step-btn" data-act="step" data-dir="1" data-target="${esc(id)}" aria-label="Increase">+</button>
-    <div class="slider-val" data-valfor="${esc(id)}">$${fmtK(value)}k</div></div>`;
+    <input class="val-input" type="text" inputmode="decimal" enterkeyhint="done" value="${fmtK(value)}"
+      data-act="val" data-id="${esc(id)}" data-valfor="${esc(id)}" aria-label="Value in thousands"/>
+    <span class="val-k">k</span></div>`;
 }
 
 // Nudges the range input and replays a normal input event so the existing slide handlers
@@ -772,33 +827,57 @@ function updatePoolTotalLive() {
   if (hint) hint.textContent = `${pool.length} items in play - $${fmtK(total)}k total pool value`;
 }
 
+function syncValueLabel(id, v) {
+  const lab = bodyEl.querySelector(`.val-input[data-valfor="${CSS.escape(id)}"]`);
+  if (lab) lab.value = fmtK(v);
+}
+
+// Accepts either how you'd read it off the screen ("41.5") or the full figure ("41500"), then
+// clamps and snaps to the item's real increment so a typo can't produce an impossible value.
+function commitTypedValue(el) {
+  const id = el.dataset.id;
+  const range = bodyEl.querySelector(`input[type=range][data-id="${CSS.escape(id)}"]`);
+  if (!range) return;
+  const min = parseFloat(range.min), max = parseFloat(range.max), step = parseFloat(range.step) || 1;
+  let n = parseFloat(String(el.value).replace(/[^0-9.]/g, ''));
+  if (!isFinite(n)) { el.value = fmtK(parseFloat(range.value)); return; }
+  if (n < 1000) n *= 1000;
+  n = Math.min(max, Math.max(min, min + Math.round((n - min) / step) * step));
+  range.value = n;
+  range.dispatchEvent(new Event('input', { bubbles: true }));
+  el.value = fmtK(n);
+}
+
 function attachListeners() {
   bodyEl.querySelectorAll('[data-act]').forEach(el => {
     const act = el.dataset.act;
     const id = el.dataset.id;
     if (act === 'collapse') el.addEventListener('click', () => toggleCollapse(id));
-    else if (act === 'skip') el.addEventListener('change', () => toggleSkip(id));
-    else if (act === 'empty') el.addEventListener('change', () => toggleEmpty(id));
+    else if (act === 'skip') el.addEventListener('click', () => toggleSkip(id));
+    else if (act === 'empty') el.addEventListener('click', () => toggleEmpty(id));
     else if (act === 'item') el.addEventListener('change', e => setItemKey(id, el.dataset.cat, e.target.value));
-    else if (act === 'buyer') el.addEventListener('change', () => toggleBuyerRequest(id));
+    else if (act === 'buyer') el.addEventListener('click', () => toggleBuyerRequest(id));
     else if (act === 'picked') el.addEventListener('change', () => togglePickedUp(id));
     else if (act === 'step') el.addEventListener('click', () => stepSlider(el.dataset.target, parseInt(el.dataset.dir, 10)));
     else if (act === 'add-deposit') el.addEventListener('click', addDepositBox);
     else if (act === 'remove-deposit') el.addEventListener('click', () => removeDepositBox(parseInt(el.dataset.idx, 10)));
+    else if (act === 'val') {
+      el.addEventListener('focus', () => el.select());
+      el.addEventListener('change', () => commitTypedValue(el));
+      el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
+    }
     else if (act === 'slide') {
       el.addEventListener('input', e => {
         const v = parseFloat(e.target.value);
         setValue(id, v);
-        const lab = bodyEl.querySelector(`[data-valfor="${CSS.escape(id)}"]`);
-        if (lab) lab.textContent = `$${fmtK(v)}k`;
+        syncValueLabel(id, v);
         updatePoolTotalLive();
       });
     } else if (act === 'deposit-slide') {
       el.addEventListener('input', e => {
         const v = parseFloat(e.target.value);
         setDepositBoxValue(parseInt(el.dataset.idx, 10), v);
-        const lab = bodyEl.querySelector(`[data-valfor="${CSS.escape(id)}"]`);
-        if (lab) lab.textContent = `$${fmtK(v)}k`;
+        syncValueLabel(id, v);
         updatePoolTotalLive();
       });
     }
