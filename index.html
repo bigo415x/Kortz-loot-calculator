@@ -92,8 +92,14 @@
   .warn-line { font-size:12.5px; color:#f6e6bd; line-height:1.35; }
   .warn-foot { font-size:10.5px; color:rgba(246,230,189,0.55); }
   .warn-item.orphan .warn-foot { color:#ffb4a2; }
-  .p-head { display:flex; align-items:center; justify-content:space-between; }
-  .p-name { font-weight:500; font-size:15px; }
+  .p-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  /* 16px so focusing it doesn't zoom the page on iOS. */
+  .p-name { flex:1; min-width:0; font-weight:500; font-size:16px; font-family:inherit; color:var(--text);
+            background:transparent; border:1px solid transparent; border-radius:6px; padding:3px 5px;
+            margin-left:-5px; min-height:30px; }
+  .p-name::placeholder { color:var(--text); opacity:1; }
+  .p-name:hover { border-color:var(--line-soft); }
+  .p-name:focus { border-color:var(--accent); background:rgba(0,0,0,0.25); outline:none; }
   .p-meta { font-size:11.5px; color:var(--muted); }
   .p-sub { font-size:11px; color:var(--accent); margin-top:-2px; }
   .bar { height:7px; border-radius:4px; background:var(--bg); overflow:hidden; }
@@ -112,6 +118,12 @@
   .grand { background:#262a60; border-radius:8px; padding:12px; display:flex; justify-content:space-between; align-items:center; }
   .grand-label { font-size:12.5px; }
   .grand-val { font-weight:600; font-size:20px; color:#f5f4ff; }
+  .share-btn { width:100%; min-height:44px; border-radius:8px; border:1px solid var(--accent);
+               background:transparent; color:var(--accent); font-size:14px; font-weight:600;
+               cursor:pointer; touch-action:manipulation; }
+  .share-btn:active { background:var(--accent); color:#161826; }
+  .share-url { width:100%; min-height:36px; font-size:16px; font-family:inherit; padding:4px 8px;
+               border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
   .empty-msg { font-size:11.5px; color:var(--muted2); }
   .footer { text-align:center; font-size:10px; color:var(--muted2); padding:14px 12px 20px; }
   .footer a { color:var(--accent); text-decoration:none; }
@@ -385,6 +397,117 @@ function loadState() {
   } catch (e) { /* corrupt or unavailable, start fresh */ }
 }
 
+/* ---------------- Share links ---------------- */
+// There is no server behind this page, so a shared plan has to travel inside the link itself. The
+// whole scouted run is packed into the URL fragment: a fragment is never sent to any host, so the
+// plan stays between whoever holds the link.
+//
+// Encoded by position rather than as plain JSON of the state. Placements are a fixed, ordered list,
+// so each one needs only which item is in it and how many increments above its floor the value sits
+// - two base-36 digits in the common case. Naming every id and item in full runs several kilobytes,
+// which messaging apps are apt to wrap or truncate; this stays a few hundred characters.
+const SHARE_VERSION = 1;
+
+function b64urlEncode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = ''; bytes.forEach(b => { bin += String.fromCharCode(b); });
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(s) {
+  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+  return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+}
+// The step a placement's value moves in, and the item list it picks from - shared by both directions
+// so the encoder and decoder can never disagree about what a token means.
+function slotCodec(pl) {
+  const cat = getCategory(KIND_TO_CATEGORY[pl.kind]);
+  return { items: cat.items, fallbackStep: pl.kind === 'crate' ? 5000 : 500 };
+}
+
+function encodePlan() {
+  const placements = allPlacements();
+  // An 'x' prefix marks the spot empty, and the item and value still ride along behind it. Encoding
+  // emptiness *instead of* the reading loses what was scouted the moment anyone un-ticks the box.
+  const s = placements.map(pl => {
+    const slot = state.slots[pl.id] || {};
+    const { items, fallbackStep } = slotCodec(pl);
+    let idx = pl.kind === 'crate' ? 0 : items.findIndex(it => it.itemName === (slot.itemKey || (SPOTS[pl.id] || {}).item));
+    if (idx < 0) idx = 0;
+    const item = items[idx];
+    const step = item.valueIncrement || fallbackStep;
+    const value = slot.value !== undefined ? slot.value : (pl.kind === 'crate' ? item.valueMin : itemMid(item));
+    return ((slot.empty || slot.skip) ? 'x' : '')
+      + idx.toString(36) + '.' + Math.round((value - item.valueMin) / step).toString(36);
+  });
+  const ids = placements.map(pl => pl.id);
+  return b64urlEncode(JSON.stringify({
+    v: SHARE_VERSION,
+    n: state.playerCount,
+    m: state.resultMode === 'fastest' ? 'f' : 'p',
+    s,
+    d: getDepositBoxes().map((val, i) => ((state.slots['vault_depositbox_' + i] || {}).empty ? 'x' : '')
+      + Math.round((val - 5000) / 500).toString(36)),
+    b: state.buyerRequests.map(id => ids.indexOf(id)).filter(i => i >= 0),
+    p: state.playerNames || {},
+  }));
+}
+
+// Clamped on the way in at every step: a link can be truncated, hand-edited or built by an older
+// version of the page, and none of that should be able to produce an item or a value that isn't real.
+function decodePlan(encoded) {
+  const o = JSON.parse(b64urlDecode(encoded));
+  if (!o || o.v !== SHARE_VERSION || !Array.isArray(o.s)) return false;
+  const placements = allPlacements();
+  const slots = {};
+  placements.forEach((pl, i) => {
+    let token = o.s[i];
+    if (typeof token !== 'string') return;
+    const isEmpty = token.charAt(0) === 'x';
+    if (isEmpty) token = token.slice(1);
+    const [rawIdx, rawStep] = token.split('.');
+    const { items, fallbackStep } = slotCodec(pl);
+    const idx = Math.min(items.length - 1, Math.max(0, parseInt(rawIdx, 36) || 0));
+    const item = items[idx];
+    const step = item.valueIncrement || fallbackStep;
+    const value = Math.min(item.valueMax, Math.max(item.valueMin,
+      item.valueMin + (parseInt(rawStep, 36) || 0) * step));
+    const slot = pl.kind === 'crate' ? { value } : { itemKey: item.itemName, value };
+    if (isEmpty) slot[pl.kind === 'crate' ? 'skip' : 'empty'] = true;
+    slots[pl.id] = slot;
+  });
+
+  const deposits = [];
+  (Array.isArray(o.d) ? o.d : []).forEach((token, i) => {
+    let t = String(token);
+    if (t.charAt(0) === 'x') { t = t.slice(1); slots['vault_depositbox_' + i] = { empty: true }; }
+    deposits.push(Math.min(12500, Math.max(5000, 5000 + (parseInt(t, 36) || 0) * 500)));
+  });
+
+  state.slots = slots;
+  state.depositBoxes = deposits;
+  state.playerCount = Math.min(4, Math.max(1, parseInt(o.n, 10) || 1));
+  state.resultMode = o.m === 'f' ? 'fastest' : 'payout';
+  state.buyerRequests = (Array.isArray(o.b) ? o.b : [])
+    .map(i => (placements[i] || {}).id).filter(Boolean).slice(0, MAX_BUYER_REQUESTS);
+  state.playerNames = (o.p && typeof o.p === 'object') ? o.p : {};
+  state.pickedUp = {};
+  return true;
+}
+
+function shareUrl() { return location.href.split('#')[0] + '#plan=' + encodePlan(); }
+
+// True only for the load that came in on a link, so the banner marks the hand-off and then goes away.
+let openedFromShare = false;
+function applySharedPlan() {
+  const m = /[#&]plan=([A-Za-z0-9\-_]+)/.exec(location.hash);
+  if (!m) return false;
+  let ok = false;
+  try { ok = decodePlan(m[1]); } catch (e) { ok = false; }
+  // Drop the fragment either way, so a later edit isn't silently undone by a refresh.
+  try { history.replaceState(null, '', location.href.split('#')[0]); } catch (e) { /* file:// - harmless */ }
+  return ok;
+}
+
 const state = {
   tab: 'items',
   playerCount: 1,
@@ -394,6 +517,7 @@ const state = {
   buyerRequests: [],  // [itemId, ...] - heist-wide, auto-fulfilled by whichever player has room
   pickedUp: {},       // itemId -> bool - mid-run progress tracker, does not affect the math
   resultMode: 'payout', // 'payout' = richest bags anywhere | 'fastest' = stay in your own area
+  playerNames: {},    // player number -> gamertag, blank falls back to "Player N"
 };
 
 const DEFAULTS = {
@@ -628,16 +752,12 @@ function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests
   return { players, bonusActive, fulfilledCount, totalValue, totalSpillPct };
 }
 
-// Solo has no patch or Hacker concept (Crisp Gallery isn't accessible at 1 player anyway) - it owns
+// Searches every plan for one crew size and mode, given the requests it is being asked to force.
+// Solo has no patch or Hacker concept (Crisp Gallery isn't reachable at 1 player anyway) - it owns
 // the whole route, so every item is distance 0 and the knapsack just maximizes value, ordered as a
-// walk. Runs through the same evaluatePlan as the crew sizes.
-function computeCrewPlan(pool, playerCount, buyerRequestIds, patchFirst) {
-  const validRequests = buyerRequestIds.map(id => pool.find(it => it.id === id)).filter(Boolean);
-
-  // Solo owns the whole route, so both modes collapse to the same single value-maximizing pass.
-  if (playerCount <= 1) {
-    return evaluatePlan(pool, 1, [null], null, validRequests, patchFirst);
-  }
+// walk. It runs through the same evaluatePlan as the crew sizes.
+function solvePlans(pool, playerCount, forced, patchFirst) {
+  if (playerCount <= 1) return evaluatePlan(pool, 1, [null], null, forced, patchFirst);
 
   // Brute-force every floor assignment x Hacker choice, keeping the best plan in strict priority:
   //  1. Fulfill as many Buyer's Requests as physically possible - always takes priority.
@@ -650,7 +770,7 @@ function computeCrewPlan(pool, playerCount, buyerRequestIds, patchFirst) {
       // The Hacker avoids the floor holding Crisp Gallery when possible - they're stuck at the door,
       // so those items only reach them as a genuine last-resort spillover.
       if (hackerIdx !== null && FLOOR_CLUSTERS[assign[hackerIdx]].includes('crisp')) return;
-      const result = evaluatePlan(pool, playerCount, assign, hackerIdx, validRequests, patchFirst);
+      const result = evaluatePlan(pool, playerCount, assign, hackerIdx, forced, patchFirst);
       const better = !best
         || result.fulfilledCount > best.fulfilledCount
         || (result.fulfilledCount === best.fulfilledCount && result.totalValue > best.totalValue)
@@ -658,13 +778,37 @@ function computeCrewPlan(pool, playerCount, buyerRequestIds, patchFirst) {
       if (better) best = result;
     });
   });
-
   return best;
+}
+
+// The bonus is all or nothing: two Buyer's Requests out of three pay exactly what none pay. So the
+// moment the full set can't land, chasing it is pure loss - it forces low-value items into bags and
+// bumps out better loot to buy a bonus that will never arrive. Whenever the set can't be completed,
+// the requests are dropped entirely and the plan goes for maximum cash, and the results say why.
+//
+// Solo is where this bites hardest: anything scouted in the Crisp Gallery isn't in a solo pool at
+// all, so a request pinned there is unreachable before the search even starts.
+function computeCrewPlan(pool, playerCount, buyerRequestIds, patchFirst) {
+  const reachable = buyerRequestIds.map(id => pool.find(it => it.id === id)).filter(Boolean);
+  const unreachable = buyerRequestIds.length - reachable.length;
+  const fullSet = buyerRequestIds.length === MAX_BUYER_REQUESTS && unreachable === 0;
+
+  let best = solvePlans(pool, playerCount, fullSet ? reachable : [], patchFirst);
+  let dropped = null;
+  if (fullSet) {
+    // All three exist, but no arrangement of bags can carry them all.
+    if (best.fulfilledCount < MAX_BUYER_REQUESTS) { dropped = 'nofit'; best = solvePlans(pool, playerCount, [], patchFirst); }
+  } else if (buyerRequestIds.length) {
+    dropped = unreachable ? 'unreachable' : 'incomplete';
+  }
+  return { ...best, dropped, unreachable, selectedCount: buyerRequestIds.length };
 }
 
 /* ---------------- Mutations ---------------- */
 function setTab(t) { state.tab = t; saveState(); render(); }
 function setResultMode(m) { state.resultMode = m; saveState(); render(); }
+// No re-render: the name is a label, and redrawing mid-word would take the keyboard away.
+function setPlayerName(num, name) { state.playerNames[num] = name; saveState(); }
 function setPlayerCount(n) { state.playerCount = n; saveState(); render(); }
 function resetAll() { state.slots = {}; state.depositBoxes = null; state.buyerRequests = []; state.pickedUp = {}; saveState(); render(); }
 function togglePickedUp(id) { state.pickedUp[id] = !state.pickedUp[id]; saveState(); render(); }
@@ -907,6 +1051,10 @@ function renderResultsTab(pool) {
       ${btn('fastest', 'Fastest', 'stay in your own area', fastestPlan)}</div>`;
   }
 
+  if (openedFromShare) {
+    html += `<div class="note-box">Someone shared this plan with you. It's yours to edit now - change anything and it saves to this device.</div>`;
+  }
+
   const notices = planNotices(players);
   if (notices.length) {
     html += `<div class="warn-box"><div class="warn-title">Before these open</div>
@@ -922,7 +1070,18 @@ function renderResultsTab(pool) {
       : `Every player takes the richest loot left anywhere in the building, so the bags are worth as much as they can be. Nobody is held to a floor, so expect crossing paths and backtracking${shortfall > 0 ? ` - the Fastest plan gives up $${fmtK(shortfall)}k to avoid it` : ''}.`
     } Crisp Gallery needs someone to hold the door: that player gets none of its loot, chosen automatically for the best total.</div>`;
   }
-  html += `<div class="hint">${state.buyerRequests.length}/3 Buyer's Requests selected (marked with * below) - auto-fulfilled by whichever player has room</div>`;
+  if (players && payoutPlan.dropped) {
+    const why = {
+      unreachable: `${payoutPlan.unreachable} of them ${payoutPlan.unreachable === 1 ? 'is' : 'are'} in the Crisp Gallery, which needs 2+ players`,
+      incomplete: `only ${payoutPlan.selectedCount} of 3 ${payoutPlan.selectedCount === 1 ? 'is' : 'are'} selected`,
+      nofit: `all three are here, but no arrangement of bags carries them all`,
+    }[payoutPlan.dropped];
+    html += `<div class="warn-box"><div class="warn-title">Buyer's Requests dropped</div>
+      <div class="warn-item"><div class="warn-line">The $50k bonus needs all three and ${esc(why)} — so it can't be earned.</div>
+      <div class="warn-foot">Two out of three pays the same as none, so the plan ignores them and goes for maximum cash instead.</div></div></div>`;
+  } else {
+    html += `<div class="hint">${state.buyerRequests.length}/3 Buyer's Requests selected (marked with * below) - auto-fulfilled by whichever player has room</div>`;
+  }
   html += `<div class="hint">Picks maximize cash, not item count or headline price - bag space is the real currency. Paintings look big but cost 50% of a bag, so they lose to smaller loot with a higher per-1% return (shown under each row).</div>`;
 
   players.forEach(p => {
@@ -943,8 +1102,12 @@ function renderResultsTab(pool) {
     const hackerNote = p.isHacker ? 'Crisp Gallery Hacker, no Crisp loot' : '';
     const subLine = [patchLabel, hackerNote].filter(Boolean).join(' · ');
 
+    // The name is an input rather than a heading so a gamertag can go straight in. It feeds nothing
+    // but the label, so typing writes state without re-rendering - a re-render would steal focus.
     html += `<div class="card">
-      <div class="p-head"><div class="p-name">Player ${p.num}</div>
+      <div class="p-head">
+        <input class="p-name" data-act="pname" data-num="${p.num}" value="${esc(state.playerNames[p.num] || '')}"
+          placeholder="Player ${p.num}" aria-label="Name for player ${p.num}" enterkeyhint="done" maxlength="24"/>
         <div class="p-meta">${p.pctUsed}% used - ${100 - p.pctUsed}% left</div></div>`;
     if (subLine) html += `<div class="p-sub">${esc(subLine)}</div>`;
     html += `<div class="bar"><div class="bar-fill" style="width:${Math.min(100, p.pctUsed)}%"></div></div>
@@ -974,7 +1137,31 @@ function renderResultsTab(pool) {
   }
   html += `<div class="grand"><span class="grand-label">Total payout</span>
     <span class="grand-val">$${fmtK(totalValue)}k</span></div>`;
+  html += `<button class="share-btn" data-act="share">Share this plan</button>
+    <div class="hint" id="shareHint">Sends a link holding this whole scouted run - names, values and both plans. Opening it replaces whatever is saved on that device.</div>`;
   return html;
+}
+
+// Native share sheet where there is one (that's the phone case, and the point of the feature),
+// clipboard everywhere else, and a selectable box if the browser refuses both.
+async function sharePlan(btn) {
+  const url = shareUrl();
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Kortz Center loot plan', url }); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    btn.textContent = 'Link copied';
+    setTimeout(() => { btn.textContent = 'Share this plan'; }, 2000);
+  } catch (e) {
+    const hint = document.getElementById('shareHint');
+    if (hint) {
+      hint.innerHTML = `<input class="share-url" readonly value="${esc(url)}" aria-label="Shareable link"/>`;
+      const field = hint.querySelector('.share-url');
+      field.focus(); field.select();
+    }
+  }
 }
 
 /* ---------------- Event wiring ---------------- */
@@ -1017,6 +1204,11 @@ function attachListeners() {
     else if (act === 'buyer') el.addEventListener('click', () => toggleBuyerRequest(id));
     else if (act === 'picked') el.addEventListener('change', () => togglePickedUp(id));
     else if (act === 'mode') el.addEventListener('click', () => setResultMode(el.dataset.mode));
+    else if (act === 'pname') {
+      el.addEventListener('input', () => setPlayerName(el.dataset.num, el.value));
+      el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
+    }
+    else if (act === 'share') el.addEventListener('click', () => sharePlan(el));
     else if (act === 'step') el.addEventListener('click', () => stepSlider(el.dataset.target, parseInt(el.dataset.dir, 10)));
     else if (act === 'add-deposit') el.addEventListener('click', addDepositBox);
     else if (act === 'remove-deposit') el.addEventListener('click', () => removeDepositBox(parseInt(el.dataset.idx, 10)));
@@ -1049,6 +1241,8 @@ document.getElementById('tabItems').addEventListener('click', () => setTab('item
 document.getElementById('tabResults').addEventListener('click', () => setTab('results'));
 
 loadState();
+// A link wins over whatever this device had saved - opening one is asking to see that plan.
+if (applySharedPlan()) { openedFromShare = true; state.tab = 'results'; saveState(); }
 render();
 </script>
 </body>
