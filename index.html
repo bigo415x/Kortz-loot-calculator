@@ -76,6 +76,15 @@
   .step-btn:active { background:var(--accent); color:#161826; }
   .add-deposit { all:unset; cursor:pointer; font-size:12px; color:var(--accent); min-height:32px; }
   .note-box { font-size:11px; line-height:1.4; color:var(--muted); background:var(--card); border-radius:8px; padding:8px 10px; }
+  .modes { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--card); }
+  .mode { flex:1; min-width:0; padding:8px 6px; border:none; cursor:pointer; background:transparent; color:var(--text);
+          display:flex; flex-direction:column; align-items:center; gap:1px; touch-action:manipulation; }
+  .mode.right { border-left:1px solid var(--line); }
+  .mode.active { background:var(--bg); box-shadow:inset 0 0 0 1px var(--accent); }
+  .mode-name { font-size:12px; }
+  .mode.active .mode-name { color:var(--accent); font-weight:600; }
+  .mode-val { font-size:17px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .mode-sub { font-size:9.5px; color:var(--muted2); text-align:center; }
   .warn-box { background:#3a2f1c; border:1px solid #7a6224; border-radius:8px; padding:9px 11px;
               display:flex; flex-direction:column; gap:3px; }
   .warn-title { font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#f0c860; }
@@ -367,6 +376,7 @@ const state = {
   collapsed: {},      // sectionId -> bool
   buyerRequests: [],  // [itemId, ...] - heist-wide, auto-fulfilled by whichever player has room
   pickedUp: {},       // itemId -> bool - mid-run progress tracker, does not affect the math
+  resultMode: 'payout', // 'payout' = richest bags anywhere | 'fastest' = stay in your own area
 };
 
 const DEFAULTS = {
@@ -545,7 +555,7 @@ function forceAssignBuyerRequests(validRequests, playerCount, hackerIdx) {
 // (if anyone) is the Crisp Gallery "Hacker" - excluded from every Crisp item, everywhere, in exchange
 // for letting the crew access Crisp Gallery at all. hackerIdx === null means nobody hacks, so no one
 // gets Crisp loot.
-function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests) {
+function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests, patchFirst) {
   const { lockedByPlayer, fulfilledCount } = forceAssignBuyerRequests(validRequests, playerCount, hackerIdx);
   const claimedIds = new Set();
   lockedByPlayer.forEach(items => items.forEach(it => claimedIds.add(it.id)));
@@ -559,20 +569,31 @@ function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests
     const capacity = Math.max(0, 100 - lockedPct);
     const crispBlocked = it => it.isCrisp && (hackerIdx === null || i === hackerIdx);
 
-    // Clear your own patch first, then top off from outside it with whatever bag is left. Two
-    // passes rather than one knapsack over everything, because proximity has to actually cost
-    // something to matter: as a tie-break it never fires (item values are rarely exactly equal) and
-    // every player just converges on the same richest loot wherever it sits. The patch is the whole
-    // point of assigning areas, so it binds - the crew trades a little value for a much shorter walk.
-    //
-    // The Vault and the Garage count as "own patch" for everyone - they're on the way in regardless.
     const available = pool.filter(it => !claimedIds.has(it.id) && !crispBlocked(it));
-    const inPatch = available.filter(it => distanceToPatch(it.cluster, patch) === 0);
-    const outside = available.filter(it => distanceToPatch(it.cluster, patch) > 0);
+    let own, top;
 
-    const own = knapsack(sortByDistanceFrom(inPatch, patch), capacity);
-    const spare = capacity - own.pct;
-    const top = spare > 0 ? knapsack(sortByDistanceFrom(outside, patch), spare) : { items: [], value: 0, pct: 0 };
+    if (patchFirst) {
+      // FASTEST. Clear your own patch, then top off from outside it with whatever bag is left. Two
+      // passes rather than one knapsack over everything, because proximity has to actually cost
+      // something to matter: as a tie-break it never fires (item values are rarely exactly equal)
+      // and every player just converges on the same richest loot wherever it sits, which makes the
+      // area assignment describe nothing. Here the patch binds - a little value for a shorter walk.
+      //
+      // Vault and Garage count as "own patch" for everyone - they're on the way in regardless.
+      const inPatch = available.filter(it => distanceToPatch(it.cluster, patch) === 0);
+      const outside = available.filter(it => distanceToPatch(it.cluster, patch) > 0);
+      own = knapsack(sortByDistanceFrom(inPatch, patch), capacity);
+      const spare = capacity - own.pct;
+      top = spare > 0 ? knapsack(sortByDistanceFrom(outside, patch), spare) : { items: [], value: 0, pct: 0 };
+    } else {
+      // HIGHEST PAYOUT. One knapsack over the whole remaining pool for the whole bag, which is what
+      // guarantees true value-maximality. Distance still orders the input, so among equally rich
+      // sets the nearer one wins - but a richer item on the far side of the building always beats a
+      // closer one, and the walk is whatever it has to be.
+      own = knapsack(sortByDistanceFrom(available, patch), capacity);
+      top = { items: [], value: 0, pct: 0 };
+    }
+
     const fillItems = [...own.items, ...top.items];
     fillItems.forEach(it => claimedIds.add(it.id));
 
@@ -591,11 +612,12 @@ function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests
 // Solo has no patch or Hacker concept (Crisp Gallery isn't accessible at 1 player anyway) - it owns
 // the whole route, so every item is distance 0 and the knapsack just maximizes value, ordered as a
 // walk. Runs through the same evaluatePlan as the crew sizes.
-function computeCrewPlan(pool, playerCount, buyerRequestIds) {
+function computeCrewPlan(pool, playerCount, buyerRequestIds, patchFirst) {
   const validRequests = buyerRequestIds.map(id => pool.find(it => it.id === id)).filter(Boolean);
 
+  // Solo owns the whole route, so both modes collapse to the same single value-maximizing pass.
   if (playerCount <= 1) {
-    return evaluatePlan(pool, 1, [ASSIGNABLE_CLUSTERS], null, validRequests);
+    return evaluatePlan(pool, 1, [ASSIGNABLE_CLUSTERS], null, validRequests, patchFirst);
   }
 
   // Brute-force every way of cutting the route into per-player patches x Hacker choice, keeping the
@@ -614,7 +636,7 @@ function computeCrewPlan(pool, playerCount, buyerRequestIds) {
       // The Hacker avoids owning Crisp Gallery when possible - they're stuck at the door, so those
       // items only reach them as a genuine last-resort spillover.
       if (hackerIdx !== null && assign[hackerIdx].includes('crisp')) return;
-      const result = evaluatePlan(pool, playerCount, assign, hackerIdx, validRequests);
+      const result = evaluatePlan(pool, playerCount, assign, hackerIdx, validRequests, patchFirst);
       const better = !best
         || result.fulfilledCount > best.fulfilledCount
         || (result.fulfilledCount === best.fulfilledCount && result.totalValue > best.totalValue)
@@ -628,6 +650,7 @@ function computeCrewPlan(pool, playerCount, buyerRequestIds) {
 
 /* ---------------- Mutations ---------------- */
 function setTab(t) { state.tab = t; saveState(); render(); }
+function setResultMode(m) { state.resultMode = m; saveState(); render(); }
 function setPlayerCount(n) { state.playerCount = n; saveState(); render(); }
 function resetAll() { state.slots = {}; state.depositBoxes = null; state.buyerRequests = []; state.pickedUp = {}; saveState(); render(); }
 function togglePickedUp(id) { state.pickedUp[id] = !state.pickedUp[id]; saveState(); render(); }
@@ -828,8 +851,25 @@ function prepWarnings(players) {
 }
 
 function renderResultsTab(pool) {
-  const { players, bonusActive, totalValue } = computeCrewPlan(pool, state.playerCount, state.buyerRequests);
+  const crew = state.playerCount > 1;
+  // Both plans are always solved - the totals are the whole point of the choice, so each mode's
+  // number sits on its own button and you can see what the shorter walk costs before taking it.
+  const payoutPlan = computeCrewPlan(pool, state.playerCount, state.buyerRequests, false);
+  const fastestPlan = crew ? computeCrewPlan(pool, state.playerCount, state.buyerRequests, true) : payoutPlan;
+  const mode = state.resultMode === 'fastest' ? 'fastest' : 'payout';
+  const { players, bonusActive, totalValue } = mode === 'fastest' ? fastestPlan : payoutPlan;
   let html = '';
+
+  // Solo has no areas to divide, so both modes are the same plan and the choice is noise.
+  if (crew) {
+    const btn = (id, name, sub, plan) => `<button class="mode${id === 'fastest' ? ' right' : ''}${mode === id ? ' active' : ''}" data-act="mode" data-mode="${id}">
+      <span class="mode-name">${name}</span>
+      <span class="mode-val">$${fmtK(plan.totalValue)}k</span>
+      <span class="mode-sub">${sub}</span></button>`;
+    html += `<div class="modes">
+      ${btn('payout', 'Highest payout', 'best loot anywhere', payoutPlan)}
+      ${btn('fastest', 'Fastest', 'stay in your own area', fastestPlan)}</div>`;
+  }
 
   const warnings = prepWarnings(players);
   if (warnings.length) {
@@ -838,11 +878,15 @@ function renderResultsTab(pool) {
       <div class="warn-foot">Host sources the tools.</div></div>`;
   }
 
-  if (state.playerCount > 1) {
-    html += `<div class="note-box">Each player gets a run of neighbouring areas to clear, so their list is a short walk rather than a lap of the building. They fill up from their own patch first and only reach outside it once that runs dry, which costs the crew a few percent against letting everyone cherry-pick the whole map - the trade is less backtracking. Crisp Gallery needs someone to hold the door: that player gets none of its loot, chosen automatically for the best total.</div>`;
+  if (crew) {
+    const shortfall = payoutPlan.totalValue - fastestPlan.totalValue;
+    html += `<div class="note-box">${mode === 'fastest'
+      ? `Each player gets a run of neighbouring areas to clear, so their list is a short walk rather than a lap of the building. They fill up from their own patch first and only reach outside it once that runs dry${shortfall > 0 ? `, which is what costs $${fmtK(shortfall)}k against the highest-payout plan` : ''} - the trade is less backtracking.`
+      : `Every player takes the richest loot left anywhere in the building, so the bags are worth as much as they can be. Nobody is held to an area, so expect crossing paths and backtracking${shortfall > 0 ? ` - the Fastest plan gives up $${fmtK(shortfall)}k to avoid it` : ''}.`
+    } Crisp Gallery needs someone to hold the door: that player gets none of its loot, chosen automatically for the best total.</div>`;
   }
   html += `<div class="hint">${state.buyerRequests.length}/3 Buyer's Requests selected (marked with * below) - auto-fulfilled by whichever player has room</div>`;
-  html += `<div class="hint">Within each patch the picks maximize cash, not item count or headline price - bag space is the real currency. Paintings look big but cost 50% of a bag, so they lose to smaller loot with a higher per-1% return (shown under each row).</div>`;
+  html += `<div class="hint">Picks maximize cash, not item count or headline price - bag space is the real currency. Paintings look big but cost 50% of a bag, so they lose to smaller loot with a higher per-1% return (shown under each row).</div>`;
 
   players.forEach(p => {
     // Ordered as a walking route: cluster in run order, then spot order within the cluster - which
@@ -856,8 +900,9 @@ function renderResultsTab(pool) {
       return b.value - a.value;
     });
     // Named by its ends - "Back Exit → North Hall" is the instruction; the clusters between are
-    // implied by the route order and listed out in the rows below anyway.
-    const patchLabel = state.playerCount > 1 && p.patch && p.patch.length
+    // implied by the route order and listed out in the rows below anyway. Only shown on the Fastest
+    // plan: under Highest payout the patch doesn't hold anyone, so naming one would be a fiction.
+    const patchLabel = mode === 'fastest' && crew && p.patch && p.patch.length
       ? (p.patch.length === 1
           ? CLUSTER_LABEL[p.patch[0]]
           : `${CLUSTER_LABEL[p.patch[0]]} → ${CLUSTER_LABEL[p.patch[p.patch.length - 1]]}`)
@@ -939,6 +984,7 @@ function attachListeners() {
     else if (act === 'item') el.addEventListener('change', e => setItemKey(id, el.dataset.cat, e.target.value));
     else if (act === 'buyer') el.addEventListener('click', () => toggleBuyerRequest(id));
     else if (act === 'picked') el.addEventListener('change', () => togglePickedUp(id));
+    else if (act === 'mode') el.addEventListener('click', () => setResultMode(el.dataset.mode));
     else if (act === 'step') el.addEventListener('click', () => stepSlider(el.dataset.target, parseInt(el.dataset.dir, 10)));
     else if (act === 'add-deposit') el.addEventListener('click', addDepositBox);
     else if (act === 'remove-deposit') el.addEventListener('click', () => removeDepositBox(parseInt(el.dataset.idx, 10)));
