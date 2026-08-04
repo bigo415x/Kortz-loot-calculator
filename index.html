@@ -88,8 +88,10 @@
   .warn-box { background:#3a2f1c; border:1px solid #7a6224; border-radius:8px; padding:9px 11px;
               display:flex; flex-direction:column; gap:3px; }
   .warn-title { font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#f0c860; }
-  .warn-line { font-size:12.5px; color:#f6e6bd; }
+  .warn-item { display:flex; flex-direction:column; gap:1px; }
+  .warn-line { font-size:12.5px; color:#f6e6bd; line-height:1.35; }
   .warn-foot { font-size:10.5px; color:rgba(246,230,189,0.55); }
+  .warn-item.orphan .warn-foot { color:#ffb4a2; }
   .p-head { display:flex; align-items:center; justify-content:space-between; }
   .p-name { font-weight:500; font-size:15px; }
   .p-meta { font-size:11.5px; color:var(--muted); }
@@ -272,11 +274,18 @@ function distanceToPatch(cluster, patch) {
 // anything on their floor, in any cluster, so a rich cluster is never fenced off from whoever is
 // standing on it. Crossing to another FLOOR is the thing worth avoiding, and the only thing the
 // plan tries to avoid.
+// The Back Exit is a subfloor of the Lower Gallery - down a flight of stairs, so not free to reach,
+// but nearer than crossing to the Upper Gallery. It belongs to whoever works the Lower Gallery
+// rather than standing alone: as its own floor nobody was ever assigned it at these crew sizes and
+// its spots went unlooted every run. The stairs still cost something in the walk, which the cluster
+// distance already carries - backexit sits next to the south hall in the route, not on top of it.
 const FLOORS = [
-  { id: 'lower_back', label: 'Lower Gallery - Back Exit',      clusters: ['backexit'] },
-  { id: 'lower',      label: 'Lower Gallery',                  clusters: ['south', 'westarm', 'north'] },
-  { id: 'upper',      label: 'Upper Gallery / Crisp Gallery',  clusters: ['westcor', 'eastwall', 'crisp'] },
+  { id: 'lower', label: 'Lower Gallery',                 clusters: ['backexit', 'south', 'westarm', 'north'] },
+  { id: 'upper', label: 'Upper Gallery / Crisp Gallery', clusters: ['westcor', 'eastwall', 'crisp'] },
 ];
+// Killing the alarm is done here, in the run, and every small glass case in the building stays shut
+// until it is - so whoever works this floor carries that job for the whole crew.
+const ALARM_FLOOR = 'lower';
 const FLOOR_IDS = FLOORS.map(f => f.id);
 const FLOOR_CLUSTERS = {};
 const FLOOR_LABEL = {};
@@ -289,10 +298,6 @@ function floorAssignments(playerCount) {
   for (let i = 0; i < playerCount; i++) out = out.flatMap(prefix => FLOOR_IDS.map(f => [...prefix, f]));
   return out;
 }
-
-// What a container needs opened before you can loot it. Surfaced as a prep warning on the results,
-// since sourcing the tools is the host's job rather than a per-item concern while scouting.
-const KIND_REQUIREMENT = { case: 'Alarm disabled', tall: 'Plasma cutter' };
 
 /* ---------------- Helpers ---------------- */
 function getCategory(id) { return LOOT_DATA.categories.find(c => c.categoryId === id); }
@@ -848,15 +853,37 @@ function stepSlider(targetId, dir) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// What the crew has to have prepped for the plan below to be openable at all. Counted from the loot
-// actually picked, not from what exists - if nothing in the plan is behind a plasma cutter, the
-// host doesn't need one, and that's worth knowing before the board.
-function prepWarnings(players) {
+// What has to happen before the plan below can actually be opened. Counted from the loot picked, not
+// from what exists - if nothing in the plan is behind a plasma cutter, the host doesn't need one.
+//
+// The two are not the same kind of thing. The cutter is kit, sourced before the board. The alarm is
+// a job done during the run, in the Lower Gallery, and every small case in the building stays shut
+// until someone does it - so the notice names who is actually down there to do it.
+function planNotices(players) {
   const picked = players.flatMap(p => [...p.lockedItems, ...p.fillItems]);
-  return Object.keys(KIND_REQUIREMENT).map(kind => {
-    const n = picked.filter(it => it.kind === kind).length;
-    return n ? `${KIND_REQUIREMENT[kind]} - ${n} ${n === 1 ? 'container' : 'containers'} in this plan` : null;
-  }).filter(Boolean);
+  const notices = [];
+
+  const tall = picked.filter(it => it.kind === 'tall').length;
+  if (tall) {
+    notices.push({ line: `Plasma cutter — ${tall} tall glass ${tall === 1 ? 'case' : 'cases'} in this plan`,
+                   foot: 'Kit, sourced by the host before the board.' });
+  }
+
+  const cases = picked.filter(it => it.kind === 'case').length;
+  if (cases) {
+    // Who genuinely sets foot in the Lower Gallery under this plan, rather than who is nominally
+    // assigned it - that stays true on the Highest payout plan, where nobody is held to a floor.
+    const there = players.filter(p => [...p.lockedItems, ...p.fillItems]
+      .some(it => FLOOR_CLUSTERS[ALARM_FLOOR].includes(it.cluster))).map(p => p.num);
+    notices.push({
+      line: `Alarm — ${cases} small glass ${cases === 1 ? 'case' : 'cases'} stay shut until it's switched off in the Lower Gallery`,
+      foot: there.length
+        ? `${there.length > 1 ? 'Players' : 'Player'} ${there.join(' and ')} ${there.length > 1 ? 'are' : 'is'} down there anyway.`
+        : 'Nobody in this plan goes to the Lower Gallery — somebody has to detour for it.',
+      orphan: !there.length,
+    });
+  }
+  return notices;
 }
 
 function renderResultsTab(pool) {
@@ -880,11 +907,12 @@ function renderResultsTab(pool) {
       ${btn('fastest', 'Fastest', 'stay in your own area', fastestPlan)}</div>`;
   }
 
-  const warnings = prepWarnings(players);
-  if (warnings.length) {
-    html += `<div class="warn-box"><div class="warn-title">Prep required</div>
-      ${warnings.map(w => `<div class="warn-line">${esc(w)}</div>`).join('')}
-      <div class="warn-foot">Host sources the tools.</div></div>`;
+  const notices = planNotices(players);
+  if (notices.length) {
+    html += `<div class="warn-box"><div class="warn-title">Before these open</div>
+      ${notices.map(w => `<div class="warn-item${w.orphan ? ' orphan' : ''}">
+        <div class="warn-line">${esc(w.line)}</div>
+        <div class="warn-foot">${esc(w.foot)}</div></div>`).join('')}</div>`;
   }
 
   if (crew) {
