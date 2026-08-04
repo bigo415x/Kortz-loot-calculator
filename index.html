@@ -76,6 +76,11 @@
   .step-btn:active { background:var(--accent); color:#161826; }
   .add-deposit { all:unset; cursor:pointer; font-size:12px; color:var(--accent); min-height:32px; }
   .note-box { font-size:11px; line-height:1.4; color:var(--muted); background:var(--card); border-radius:8px; padding:8px 10px; }
+  .warn-box { background:#3a2f1c; border:1px solid #7a6224; border-radius:8px; padding:9px 11px;
+              display:flex; flex-direction:column; gap:3px; }
+  .warn-title { font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#f0c860; }
+  .warn-line { font-size:12.5px; color:#f6e6bd; }
+  .warn-foot { font-size:10.5px; color:rgba(246,230,189,0.55); }
   .p-head { display:flex; align-items:center; justify-content:space-between; }
   .p-name { font-weight:500; font-size:15px; }
   .p-meta { font-size:11.5px; color:var(--muted); }
@@ -216,12 +221,57 @@ const KIND_TO_LOOT_TYPE = { case: 'Small Glass Case', tall: 'Tall Glass Case', p
 const MAX_BUYER_REQUESTS = 3;
 const BUYER_REQUEST_BONUS = 50000;
 
-// Upper Gallery and Crisp Gallery are physically adjacent and treated as one assignable "space".
-// Vault and Garage are passed through by everyone, so they're not assignable - any player can draw from them.
-const CLUSTER_OF_SECTION = { f1: 'f1', f2: 'f2', f3: 'f3crisp', crisp: 'f3crisp', vault: null, garage: null };
-const CLUSTER_LABEL = { f1: 'Lower Gallery - Back Exit', f2: 'Lower Gallery', f3crisp: 'Upper Gallery / Crisp Gallery' };
-const ASSIGNABLE_CLUSTERS = ['f1', 'f2', 'f3crisp'];
-const KIND_PROXIMITY_ORDER = { painting: 0, tall: 1, case: 2, crate: 3, depositbox: 4 };
+// Loot is grouped by where it physically sits, not by what kind of container it's in. The clusters
+// below are the rooms and runs the spawn map actually separates - each one is a spot you stand in
+// and clear before moving on, so a cluster is both how you scout it and how a player is assigned it.
+//
+// Listed in walking order, which is what makes proximity computable: two clusters that are adjacent
+// here are adjacent in the building, so |index difference| stands in for distance.
+const CLUSTERS = [
+  { id: 'vault',    label: 'Vault',                         assignable: false },
+  { id: 'garage',   label: 'Garage',                        assignable: false },
+  { id: 'backexit', label: 'Back Exit',                     assignable: true },
+  { id: 'south',    label: 'Lower Gallery - South Hall',    assignable: true },
+  { id: 'westarm',  label: 'Lower Gallery - West Arm',      assignable: true },
+  { id: 'north',    label: 'Lower Gallery - North Hall',    assignable: true },
+  { id: 'westcor',  label: 'Upper Gallery - West Corridor', assignable: true },
+  { id: 'eastwall', label: 'Upper Gallery - East Wall',     assignable: true },
+  { id: 'crisp',    label: 'Crisp Gallery',                 assignable: true, crew: true },
+];
+const CLUSTER_INDEX = {};
+CLUSTERS.forEach((c, i) => { CLUSTER_INDEX[c.id] = i; });
+const CLUSTER_LABEL = {};
+CLUSTERS.forEach(c => { CLUSTER_LABEL[c.id] = c.label; });
+// The Vault and the Garage sit on the way in for everybody, so nobody is assigned them - any player
+// can draw from them without it counting as leaving their patch.
+const ASSIGNABLE_CLUSTERS = CLUSTERS.filter(c => c.assignable).map(c => c.id);
+function clusterDistance(a, b) {
+  if (a === null || b === null) return 0; // pass-through areas are free for everyone
+  return Math.abs(CLUSTER_INDEX[a] - CLUSTER_INDEX[b]);
+}
+// A player's patch is a run of neighbouring clusters, so "how far is this item" is the distance to
+// the nearest cluster they already own - zero for anything inside the patch.
+function distanceToPatch(cluster, patch) {
+  if (cluster === null || !patch || !patch.length) return 0;
+  return Math.min(...patch.map(c => clusterDistance(cluster, c)));
+}
+// Every way to cut a route into `parts` contiguous, non-empty runs. Contiguity is what makes a patch
+// walkable: the cluster order is a real path through the building, so neighbours here are neighbours
+// there. It also keeps the search tiny - 4 players over 7 clusters is 20 cuts, not 7^4 assignments.
+function segmentations(list, parts) {
+  const out = [];
+  (function cut(start, remaining, acc) {
+    if (remaining === 1) { out.push([...acc, list.slice(start)]); return; }
+    for (let end = start + 1; end <= list.length - (remaining - 1); end++) {
+      cut(end, remaining - 1, [...acc, list.slice(start, end)]);
+    }
+  })(0, parts, []);
+  return out;
+}
+
+// What a container needs opened before you can loot it. Surfaced as a prep warning on the results,
+// since sourcing the tools is the host's job rather than a per-item concern while scouting.
+const KIND_REQUIREMENT = { case: 'Alarm disabled', tall: 'Plasma cutter' };
 
 /* ---------------- Helpers ---------------- */
 function getCategory(id) { return LOOT_DATA.categories.find(c => c.categoryId === id); }
@@ -231,17 +281,6 @@ function groupByType(items) {
   items.forEach(it => { if (!map[it.itemType]) { map[it.itemType] = []; order.push(it.itemType); } map[it.itemType].push(it); });
   return order.map(t => ({ itemType: t, items: map[t] }));
 }
-// Placements group by `pl.group` when set, falling back to kind - that lets the Lower Gallery's two
-// separate painting clusters collapse independently instead of reading as one run of six.
-function groupPlacements(placements) {
-  const order = []; const map = {};
-  placements.forEach(pl => { const g = pl.group || pl.kind; if (!map[g]) { map[g] = []; order.push(g); } map[g].push(pl); });
-  return order.map(g => ({ group: g, kind: map[g][0].kind, placements: map[g] }));
-}
-const GROUP_LABEL = { case: 'Small Cases', tall: 'Tall Cases', painting: 'Paintings', crate: 'Truck Crate',
-                      depositbox: 'Deposit Boxes', painting_a: 'Paintings - Area 1', painting_b: 'Paintings - Area 2' };
-// What each case type needs before you can open it, per the community map's legend.
-const KIND_REQUIREMENT = { case: 'alarm disabled', tall: 'plasma cutter' };
 function itemMid(item) {
   const step = item.valueIncrement || 500;
   const raw = (item.valueMin + item.valueMax) / 2;
@@ -289,12 +328,14 @@ function knapsack(items, capacityPct) {
   return { items: chosen, value: dp[n][capUnits], pct: totalPct };
 }
 
-// Ties in the knapsack favor whichever item comes first in the input array, so pre-sorting
-// by kind clusters same-kind picks together (proximity) without changing the max value found.
-function groupSortForProximity(items) {
+// Ties in the knapsack favor whichever item comes first in the input array, so ordering the input by
+// how far each item sits from the player's own cluster pulls ties toward loot they're already
+// standing next to. It never overrides value - a genuinely richer item further out still wins.
+function sortByDistanceFrom(items, patch) {
   return items.slice().sort((a, b) => {
-    const ka = KIND_PROXIMITY_ORDER[a.kind] ?? 9, kb = KIND_PROXIMITY_ORDER[b.kind] ?? 9;
-    if (ka !== kb) return ka - kb;
+    const da = distanceToPatch(a.cluster, patch), db = distanceToPatch(b.cluster, patch);
+    if (da !== db) return da - db;
+    if (a.locationOrder !== b.locationOrder) return a.locationOrder - b.locationOrder;
     return b.value - a.value;
   });
 }
@@ -336,20 +377,39 @@ const DEFAULTS = {
   vaultPaintings: 4, vaultDepositBoxes: 1,
 };
 
-function getSections() {
+// Placement ids are deliberately unchanged from when loot was grouped by floor and container type -
+// they key the saved slot values, so a run scouted before the regrouping keeps everything it entered.
+// Which cluster a placement belongs to is a property of the spot (see SPOTS), not of its id.
+function allPlacements() {
   const p = DEFAULTS;
-  // The Lower Gallery's six paintings sit as two clusters of three at opposite ends of the hall.
-  const f2Paintings = mk('f2', 'painting', p.floor2Paintings)
-    .map(pl => ({ ...pl, group: pl.idx < 3 ? 'painting_a' : 'painting_b' }));
   return [
-    { id: 'vault', label: 'Vault', crew: false, note: 'Deposit boxes are low value — usually skip unless space is spare', placements: mk('vault', 'painting', p.vaultPaintings) },
-    { id: 'garage', label: 'Garage', crew: false, placements: mk('garage', 'crate', 1) },
-    { id: 'f1', label: 'Lower Gallery - Back Exit', crew: false, placements: [...mk('f1', 'case', p.floor1SmallCases), ...mk('f1', 'tall', p.floor1TallCases)] },
-    { id: 'f2', label: 'Lower Gallery', crew: false, placements: [...f2Paintings, ...mk('f2', 'case', p.floor2SmallCases)] },
-    { id: 'f3', label: 'Upper Gallery', crew: false, placements: [...mk('f3', 'painting', p.floor3Paintings), ...mk('f3', 'case', p.floor3SmallCases), ...mk('f3', 'tall', p.floor3TallCases)] },
-    { id: 'crisp', label: 'Crisp Gallery', crew: true, note: 'Marked as the 2-player area on the spawn map', placements: [...mk('crisp', 'painting', p.crispGalleryPaintings), ...mk('crisp', 'case', p.crispGallerySmallCases), ...mk('crisp', 'tall', p.crispGalleryTallCases)] },
+    ...mk('vault', 'painting', p.vaultPaintings),
+    ...mk('garage', 'crate', 1),
+    ...mk('f1', 'case', p.floor1SmallCases), ...mk('f1', 'tall', p.floor1TallCases),
+    ...mk('f2', 'painting', p.floor2Paintings), ...mk('f2', 'case', p.floor2SmallCases),
+    ...mk('f3', 'painting', p.floor3Paintings), ...mk('f3', 'case', p.floor3SmallCases), ...mk('f3', 'tall', p.floor3TallCases),
+    ...mk('crisp', 'painting', p.crispGalleryPaintings), ...mk('crisp', 'case', p.crispGallerySmallCases), ...mk('crisp', 'tall', p.crispGalleryTallCases),
   ];
 }
+
+const CLUSTER_NOTE = {
+  vault: 'Deposit boxes are low value — usually skip unless space is spare',
+  westarm: 'Off on its own in the western arm — a detour, not on the way',
+  crisp: 'Marked as the 2-player area on the spawn map',
+};
+
+function getClusters() {
+  const byCluster = {};
+  CLUSTERS.forEach(c => { byCluster[c.id] = []; });
+  allPlacements().forEach(pl => {
+    const spot = SPOTS[pl.id];
+    byCluster[spot ? spot.cluster : 'garage'].push(pl); // the truck crate is the only spot-less placement
+  });
+  // Within a cluster the walk order is just the spawn map's spot order.
+  Object.keys(byCluster).forEach(cid => byCluster[cid].sort((a, b) => spotOrder(a.id) - spotOrder(b.id)));
+  return CLUSTERS.map(c => ({ ...c, note: CLUSTER_NOTE[c.id], placements: byCluster[c.id] }));
+}
+function spotOrder(id) { return SPOTS[id] ? SPOTS[id].n : 99; }
 
 function getDepositBoxes() {
   return state.depositBoxes || Array.from({ length: DEFAULTS.vaultDepositBoxes }, () => 7500);
@@ -366,48 +426,51 @@ function getDepositBoxes() {
 // name is cosmetic. Fertility Statues are the exception - Ivory/Gold/Silver/Mahogany/Bronze really
 // do pay differently, so #12 and #20 are worth correcting to the material you actually see.
 const SPOTS = {
-  // Upper Gallery
-  f3_painting_0:    { n: 1,  item: 'Sod Off' },
-  f3_painting_1:    { n: 2,  item: 'Cooked' },
-  f3_case_0:        { n: 3,  item: 'Oeuf de Coquard royal' },
-  f3_tall_0:        { n: 4,  item: 'Coquard Carcanet (Red Spinel)' },
-  f3_tall_1:        { n: 5,  item: 'Silver Dapple Pinto' },
-  f3_case_1:        { n: 6,  item: 'Coquard Bracelets' },
-  // Crisp Gallery - the 2-player area
-  crisp_case_0:     { n: 7,  item: 'Art Deco Circlets' },
-  crisp_tall_0:     { n: 8,  item: 'Gold' },                 // Venus Statue
-  crisp_painting_0: { n: 9,  item: 'The Great Circle Back' },
-  crisp_case_1:     { n: 10, item: 'Meteorite Fragment' },
-  crisp_tall_1:     { n: 11, item: 'Ruby' },                 // Gemstone
-  crisp_case_2:     { n: 12, item: 'Ivory' },                // Fertility Statue - check the material
-  crisp_painting_1: { n: 13, item: "Don't Forgo These Blueprints" },
-  // Lower Gallery
-  f2_case_0:        { n: 14, item: 'Antique Rings' },
-  f2_painting_0:    { n: 15, item: 'Orange Crush' },
-  f2_painting_1:    { n: 16, item: 'Canis Hominem Edit' },
-  f2_case_1:        { n: 17, item: 'Art Deco Rings' },
-  f2_case_2:        { n: 18, item: 'Antique Bands' },
-  f2_painting_2:    { n: 19, item: 'The Chief' },
-  f2_case_3:        { n: 20, item: 'Ivory' },                // Fertility Statue - check the material
-  f2_painting_3:    { n: 21, item: 'Do You See Me' },
-  f2_case_4:        { n: 22, item: 'Coquard Rings' },
-  f2_painting_4:    { n: 23, item: 'Explain Yourself' },
-  f2_painting_5:    { n: 24, item: 'La Duchesse' },
-  f2_case_5:        { n: 25, item: 'Pharaonic Bangles' },
-  // Lower Gallery - Back Exit
-  f1_case_0:        { n: 26, item: 'Byzantine Hoops' },
-  f1_case_1:        { n: 27, item: 'Oeuf de Coquard royal' },
-  f1_tall_0:        { n: 28, item: 'Memento Non Mori (Emerald)' },
+  // Upper Gallery, west corridor - two paintings on the far side of the central block
+  f3_painting_0:    { n: 1,  cluster: 'westcor',  item: 'Sod Off' },
+  f3_painting_1:    { n: 2,  cluster: 'westcor',  item: 'Cooked' },
+  // Upper Gallery, east wall - an evenly spaced run down the corridor east of the block
+  f3_case_0:        { n: 3,  cluster: 'eastwall', item: 'Oeuf de Coquard royal' },
+  f3_tall_0:        { n: 4,  cluster: 'eastwall', item: 'Coquard Carcanet (Red Spinel)' },
+  f3_tall_1:        { n: 5,  cluster: 'eastwall', item: 'Silver Dapple Pinto' },
+  f3_case_1:        { n: 6,  cluster: 'eastwall', item: 'Coquard Bracelets' },
+  // Crisp Gallery - one enclosed corridor, the 2-player area, swept west to east
+  crisp_case_0:     { n: 7,  cluster: 'crisp',    item: 'Art Deco Circlets' },
+  crisp_tall_0:     { n: 8,  cluster: 'crisp',    item: 'Gold' },                 // Venus Statue
+  crisp_painting_0: { n: 9,  cluster: 'crisp',    item: 'The Great Circle Back' },
+  crisp_case_1:     { n: 10, cluster: 'crisp',    item: 'Meteorite Fragment' },
+  crisp_tall_1:     { n: 11, cluster: 'crisp',    item: 'Ruby' },                 // Gemstone
+  crisp_case_2:     { n: 12, cluster: 'crisp',    item: 'Ivory' },                // Fertility Statue - check the material
+  crisp_painting_1: { n: 13, cluster: 'crisp',    item: "Don't Forgo These Blueprints" },
+  // Lower Gallery, north hall - everything above the central atrium
+  f2_case_0:        { n: 14, cluster: 'north',    item: 'Antique Rings' },
+  f2_painting_0:    { n: 15, cluster: 'north',    item: 'Orange Crush' },
+  f2_painting_1:    { n: 16, cluster: 'north',    item: 'Canis Hominem Edit' },
+  f2_case_1:        { n: 17, cluster: 'north',    item: 'Art Deco Rings' },
+  f2_case_2:        { n: 18, cluster: 'north',    item: 'Antique Bands' },
+  f2_painting_2:    { n: 19, cluster: 'north',    item: 'The Chief' },
+  // Lower Gallery, west arm - on its own, well clear of both halls
+  f2_case_3:        { n: 20, cluster: 'westarm',  item: 'Ivory' },                // Fertility Statue - check the material
+  // Lower Gallery, south hall - everything below the central atrium
+  f2_painting_3:    { n: 21, cluster: 'south',    item: 'Do You See Me' },
+  f2_case_4:        { n: 22, cluster: 'south',    item: 'Coquard Rings' },
+  f2_painting_4:    { n: 23, cluster: 'south',    item: 'Explain Yourself' },
+  f2_painting_5:    { n: 24, cluster: 'south',    item: 'La Duchesse' },
+  f2_case_5:        { n: 25, cluster: 'south',    item: 'Pharaonic Bangles' },
+  // Back Exit - three spots packed together in the outbuilding
+  f1_case_0:        { n: 26, cluster: 'backexit', item: 'Byzantine Hoops' },
+  f1_case_1:        { n: 27, cluster: 'backexit', item: 'Oeuf de Coquard royal' },
+  f1_tall_0:        { n: 28, cluster: 'backexit', item: 'Memento Non Mori (Emerald)' },
   // Vault
-  vault_painting_0: { n: 29, item: 'With Friends Like These' },
-  vault_painting_1: { n: 30, item: 'Het Gouden Hondje' },
-  vault_painting_2: { n: 31, item: 'Swingset Study No. LXIX' },
-  vault_painting_3: { n: 32, item: 'The Hunter Becomes the Hunted' },
+  vault_painting_0: { n: 29, cluster: 'vault',    item: 'With Friends Like These' },
+  vault_painting_1: { n: 30, cluster: 'vault',    item: 'Het Gouden Hondje' },
+  vault_painting_2: { n: 31, cluster: 'vault',    item: 'Swingset Study No. LXIX' },
+  vault_painting_3: { n: 32, cluster: 'vault',    item: 'The Hunter Becomes the Hunted' },
 };
 
 function computeDefaultItemKeys() {
   const counters = {}; const map = {};
-  getSections().forEach(sec => sec.placements.forEach(pl => {
+  getClusters().forEach(sec => sec.placements.forEach(pl => {
     if (pl.kind === 'crate') return;
     const categoryId = KIND_TO_CATEGORY[pl.kind];
     const items = getCategory(categoryId).items;
@@ -427,27 +490,28 @@ function buildPool() {
     const dbId = `vault_depositbox_${idx}`;
     const dbSlot = state.slots[dbId];
     if (dbSlot && dbSlot.empty) return;
-    pool.push({ id: dbId, pct: 5, value: val, categoryLabel: 'Deposit Box', lootType: 'Deposit Box', locationLabel: 'Vault', cluster: null, isCrisp: false, kind: 'depositbox', locationOrder: getSections().findIndex(s => s.id === 'vault') });
+    pool.push({ id: dbId, pct: 5, value: val, categoryLabel: 'Deposit Box', lootType: 'Deposit Box', locationLabel: 'Vault', cluster: null, isCrisp: false, kind: 'depositbox', locationOrder: CLUSTER_INDEX.vault, spot: 99 });
   });
-  getSections().forEach((sec, locationOrder) => {
+  getClusters().forEach((sec, locationOrder) => {
     if (sec.crew && state.playerCount < 2) return;
-    const cluster = CLUSTER_OF_SECTION[sec.id];
+    const cluster = sec.assignable ? sec.id : null;
     const isCrisp = sec.id === 'crisp';
     sec.placements.forEach(pl => {
       const categoryId = KIND_TO_CATEGORY[pl.kind];
+      const common = { lootType: KIND_TO_LOOT_TYPE[pl.kind], locationLabel: sec.label, cluster, isCrisp, kind: pl.kind, locationOrder, spot: spotOrder(pl.id) };
       if (pl.kind === 'crate') {
         const item = getCategory(categoryId).items[0];
         const defaultVal = item.valueMin;
         const slot = state.slots[pl.id] || { value: defaultVal };
         if (slot.skip) return;
-        pool.push({ id: pl.id, pct: item.bagWeightPercent, value: slot.value !== undefined ? slot.value : defaultVal, categoryLabel: itemDisplayLabel(item), lootType: KIND_TO_LOOT_TYPE[pl.kind], locationLabel: sec.label, cluster, isCrisp, kind: pl.kind, locationOrder });
+        pool.push({ id: pl.id, pct: item.bagWeightPercent, value: slot.value !== undefined ? slot.value : defaultVal, categoryLabel: itemDisplayLabel(item), ...common });
       } else {
         const slot = state.slots[pl.id] || {};
         if (slot.empty) return;
         const itemKey = slot.itemKey || defaultItemKeys[pl.id];
         const item = findItem(categoryId, itemKey);
         const value = slot.value !== undefined ? slot.value : itemMid(item);
-        pool.push({ id: pl.id, pct: item.bagWeightPercent, value, categoryLabel: itemDisplayLabel(item), lootType: KIND_TO_LOOT_TYPE[pl.kind], locationLabel: sec.label, cluster, isCrisp, kind: pl.kind, locationOrder });
+        pool.push({ id: pl.id, pct: item.bagWeightPercent, value, categoryLabel: itemDisplayLabel(item), ...common });
       }
     });
   });
@@ -477,9 +541,10 @@ function forceAssignBuyerRequests(validRequests, playerCount, hackerIdx) {
   return { lockedByPlayer, fulfilledCount };
 }
 
-// Evaluates one candidate crew plan: a cluster (home floor) per player, plus who (if anyone) is
-// the Crisp Gallery "Hacker" - excluded from every Crisp item, everywhere, in exchange for letting
-// the crew access Crisp Gallery at all. hackerIdx === null means nobody hacks, so no one gets Crisp loot.
+// Evaluates one candidate crew plan: a patch (a run of neighbouring clusters) per player, plus who
+// (if anyone) is the Crisp Gallery "Hacker" - excluded from every Crisp item, everywhere, in exchange
+// for letting the crew access Crisp Gallery at all. hackerIdx === null means nobody hacks, so no one
+// gets Crisp loot.
 function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests) {
   const { lockedByPlayer, fulfilledCount } = forceAssignBuyerRequests(validRequests, playerCount, hackerIdx);
   const claimedIds = new Set();
@@ -487,25 +552,35 @@ function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests
 
   const players = [];
   for (let i = 0; i < playerCount; i++) {
-    const cluster = clusterAssign[i];
+    const patch = clusterAssign[i];
     const locked = lockedByPlayer[i];
     const lockedPct = locked.reduce((s, it) => s + it.pct, 0);
     const lockedValue = locked.reduce((s, it) => s + it.value, 0);
     const capacity = Math.max(0, 100 - lockedPct);
     const crispBlocked = it => it.isCrisp && (hackerIdx === null || i === hackerIdx);
 
-    // A single knapsack over the FULL available pool for the FULL capacity guarantees true
-    // value-maximality - the actual goal. Home-floor items are just sorted first so ties in the
-    // DP favor staying local (proximity), but a genuinely higher-value item elsewhere always wins;
-    // small home-floor items never get to "lock in" capacity before a bigger outside item competes.
+    // Clear your own patch first, then top off from outside it with whatever bag is left. Two
+    // passes rather than one knapsack over everything, because proximity has to actually cost
+    // something to matter: as a tie-break it never fires (item values are rarely exactly equal) and
+    // every player just converges on the same richest loot wherever it sits. The patch is the whole
+    // point of assigning areas, so it binds - the crew trades a little value for a much shorter walk.
+    //
+    // The Vault and the Garage count as "own patch" for everyone - they're on the way in regardless.
     const available = pool.filter(it => !claimedIds.has(it.id) && !crispBlocked(it));
-    const primary = groupSortForProximity(available.filter(it => it.cluster === cluster));
-    const outside = groupSortForProximity(available.filter(it => it.cluster !== cluster));
-    const solved = knapsack([...primary, ...outside], capacity);
-    solved.items.forEach(it => claimedIds.add(it.id));
-    const spillPct = solved.items.filter(it => it.cluster !== cluster).reduce((s, it) => s + it.pct, 0);
+    const inPatch = available.filter(it => distanceToPatch(it.cluster, patch) === 0);
+    const outside = available.filter(it => distanceToPatch(it.cluster, patch) > 0);
 
-    players.push({ num: i + 1, cluster, isHacker: i === hackerIdx, lockedItems: locked, fillItems: solved.items, value: solved.value + lockedValue, pctUsed: solved.pct + lockedPct, spillPct });
+    const own = knapsack(sortByDistanceFrom(inPatch, patch), capacity);
+    const spare = capacity - own.pct;
+    const top = spare > 0 ? knapsack(sortByDistanceFrom(outside, patch), spare) : { items: [], value: 0, pct: 0 };
+    const fillItems = [...own.items, ...top.items];
+    fillItems.forEach(it => claimedIds.add(it.id));
+
+    // Distance-weighted rather than a plain in/out count: what matters is how far you had to reach,
+    // so 30% one room over beats 30% across the map.
+    const spillPct = fillItems.reduce((s, it) => s + it.pct * distanceToPatch(it.cluster, patch), 0);
+
+    players.push({ num: i + 1, patch, isHacker: i === hackerIdx, lockedItems: locked, fillItems, value: own.value + top.value + lockedValue, pctUsed: own.pct + top.pct + lockedPct, spillPct });
   }
   const bonusActive = fulfilledCount === MAX_BUYER_REQUESTS && validRequests.length === MAX_BUYER_REQUESTS;
   const totalValue = players.reduce((s, p) => s + p.value, 0) + (bonusActive ? BUYER_REQUEST_BONUS : 0);
@@ -513,40 +588,40 @@ function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests
   return { players, bonusActive, fulfilledCount, totalValue, totalSpillPct };
 }
 
-// Solo has no floor assignment or Hacker concept (Crisp Gallery isn't accessible at 1 player anyway) -
-// route it through evaluatePlan too (cluster null matches only Vault/Garage as "primary", everything
-// else is "outside", combined into the same single value-maximizing knapsack pass).
+// Solo has no patch or Hacker concept (Crisp Gallery isn't accessible at 1 player anyway) - it owns
+// the whole route, so every item is distance 0 and the knapsack just maximizes value, ordered as a
+// walk. Runs through the same evaluatePlan as the crew sizes.
 function computeCrewPlan(pool, playerCount, buyerRequestIds) {
   const validRequests = buyerRequestIds.map(id => pool.find(it => it.id === id)).filter(Boolean);
 
   if (playerCount <= 1) {
-    return evaluatePlan(pool, 1, [null], null, validRequests);
+    return evaluatePlan(pool, 1, [ASSIGNABLE_CLUSTERS], null, validRequests);
   }
 
-  // Brute-force every floor assignment x Hacker choice (small search space, instant) and keep the
-  // best plan, in strict priority order:
+  // Brute-force every way of cutting the route into per-player patches x Hacker choice, keeping the
+  // best plan in strict priority:
   //  1. Fulfill as many Buyer's Requests as physically possible - always takes priority.
   //  2. Maximize total crew value.
-  //  3. Least total spillover (proximity - stay on your own floor when it ties on value).
+  //  3. Least total distance-weighted spillover (stay in your own patch when the value ties).
+  //
+  // Patches are contiguous runs rather than free assignments of single clusters. A run is what you
+  // can actually be told to clear ("Back Exit through South Hall"), and it stops the solver handing
+  // someone a one-item area just because it sits centrally on the route.
   let best = null;
   const hackerCandidates = [null, ...Array.from({ length: playerCount }, (_, i) => i)];
-  (function tryAssignments(prefix) {
-    if (prefix.length === playerCount) {
-      hackerCandidates.forEach(hackerIdx => {
-        // The Hacker avoids being home-assigned to the Upper/Crisp space when possible - they're
-        // stuck at the door, so those items only reach them as a genuine last-resort spillover.
-        if (hackerIdx !== null && prefix[hackerIdx] === 'f3crisp') return;
-        const result = evaluatePlan(pool, playerCount, prefix, hackerIdx, validRequests);
-        const better = !best
-          || result.fulfilledCount > best.fulfilledCount
-          || (result.fulfilledCount === best.fulfilledCount && result.totalValue > best.totalValue)
-          || (result.fulfilledCount === best.fulfilledCount && result.totalValue === best.totalValue && result.totalSpillPct < best.totalSpillPct);
-        if (better) best = result;
-      });
-      return;
-    }
-    ASSIGNABLE_CLUSTERS.forEach(c => tryAssignments([...prefix, c]));
-  })([]);
+  segmentations(ASSIGNABLE_CLUSTERS, playerCount).forEach(assign => {
+    hackerCandidates.forEach(hackerIdx => {
+      // The Hacker avoids owning Crisp Gallery when possible - they're stuck at the door, so those
+      // items only reach them as a genuine last-resort spillover.
+      if (hackerIdx !== null && assign[hackerIdx].includes('crisp')) return;
+      const result = evaluatePlan(pool, playerCount, assign, hackerIdx, validRequests);
+      const better = !best
+        || result.fulfilledCount > best.fulfilledCount
+        || (result.fulfilledCount === best.fulfilledCount && result.totalValue > best.totalValue)
+        || (result.fulfilledCount === best.fulfilledCount && result.totalValue === best.totalValue && result.totalSpillPct < best.totalSpillPct);
+      if (better) best = result;
+    });
+  });
 
   return best;
 }
@@ -608,48 +683,34 @@ function renderItemsTab(pool, poolTotalValue) {
   const defaultItemKeys = computeDefaultItemKeys();
   const depositBoxes = getDepositBoxes();
   let html = `<div class="hint">${pool.length} items in play - $${fmtK(poolTotalValue)}k total pool value</div>
-    <div class="hint">Each spot is pre-set to what normally spawns there, grouped the way you walk past them - tap an item name to change it, tap its value to type an exact number, ★ marks a Buyer's Request.</div>`;
+    <div class="hint">Grouped by where the loot physically sits, in the order you walk past it. Each spot is pre-set to what normally spawns there - tap an item name to change it, tap its value to type an exact number, ★ marks a Buyer's Request.</div>`;
 
-  // Every section is always listed - you scope the Crisp Gallery on setup missions regardless of
+  // Every cluster is always listed - you scope the Crisp Gallery on setup missions regardless of
   // crew size, so its values are always worth recording. Player count only gates the Results tab.
-  getSections().forEach(sec => {
+  getClusters().forEach(sec => {
     const collapsed = !!state.collapsed[sec.id];
     const lockedOut = sec.crew && state.playerCount < 2;
     html += `<div class="card"><button class="sec-toggle" data-act="collapse" data-id="${sec.id}">
       <span class="sec-label">${esc(sec.label)}</span>
-      <span class="sec-chevron">${collapsed ? '▸ show' : '▾ hide'}</span></button>`;
+      <span class="sec-chevron">${sec.placements.length ? `${sec.placements.length} &middot; ` : ''}${collapsed ? '▸ show' : '▾ hide'}</span></button>`;
     if (!collapsed) {
       if (lockedOut) html += `<div class="sec-note">Needs 2+ players - values save, but stay out of solo results</div>`;
       if (sec.note) html += `<div class="sec-note">${esc(sec.note)}</div>`;
-      const groups = groupPlacements(sec.placements);
-      const isVault = sec.id === 'vault';
-      const nestByKind = groups.length > 1 || isVault;
+      sec.placements.forEach(pl => { html += renderPlacement(pl, sec, defaultItemKeys); });
 
-      if (nestByKind) {
-        groups.forEach(g => {
-          const subId = `${sec.id}::${g.group}`;
-          const subCollapsed = !!state.collapsed[subId];
-          const req = KIND_REQUIREMENT[g.kind] ? ` &middot; ${KIND_REQUIREMENT[g.kind]}` : '';
-          html += `<div class="subgroup"><button class="sub-toggle" data-act="collapse" data-id="${subId}">
-            <span class="sub-label">${esc(GROUP_LABEL[g.group])} (${g.placements.length})${req}</span>
-            <span class="sec-chevron">${subCollapsed ? '▸ show' : '▾ hide'}</span></button>`;
-          if (!subCollapsed) { g.placements.forEach(pl => { html += renderPlacement(pl, sec, defaultItemKeys); }); }
-          html += `</div>`;
-        });
-        if (isVault) {
-          const subId = `${sec.id}::depositbox`;
-          const subCollapsed = !!state.collapsed[subId];
-          html += `<div class="subgroup"><button class="sub-toggle" data-act="collapse" data-id="${subId}">
-            <span class="sub-label">${esc(GROUP_LABEL.depositbox)} (${depositBoxes.length})</span>
-            <span class="sec-chevron">${subCollapsed ? '▸ show' : '▾ hide'}</span></button>`;
-          if (!subCollapsed) {
-            depositBoxes.forEach((val, idx) => { html += renderDepositBox(idx, val, depositBoxes.length > 1); });
-            html += `<button class="add-deposit" data-act="add-deposit">+ Add deposit box</button>`;
-          }
-          html += `</div>`;
+      // Deposit boxes have no fixed spot and are add/remove rather than scouted, so they stay a
+      // nested group inside the Vault rather than sitting inline with the paintings.
+      if (sec.id === 'vault') {
+        const subId = `${sec.id}::depositbox`;
+        const subCollapsed = !!state.collapsed[subId];
+        html += `<div class="subgroup"><button class="sub-toggle" data-act="collapse" data-id="${subId}">
+          <span class="sub-label">Deposit Boxes (${depositBoxes.length})</span>
+          <span class="sec-chevron">${subCollapsed ? '▸ show' : '▾ hide'}</span></button>`;
+        if (!subCollapsed) {
+          depositBoxes.forEach((val, idx) => { html += renderDepositBox(idx, val, depositBoxes.length > 1); });
+          html += `<button class="add-deposit" data-act="add-deposit">+ Add deposit box</button>`;
         }
-      } else {
-        sec.placements.forEach(pl => { html += renderPlacement(pl, sec, defaultItemKeys); });
+        html += `</div>`;
       }
     }
     html += `</div>`;
@@ -755,31 +816,55 @@ function stepSlider(targetId, dir) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+// What the crew has to have prepped for the plan below to be openable at all. Counted from the loot
+// actually picked, not from what exists - if nothing in the plan is behind a plasma cutter, the
+// host doesn't need one, and that's worth knowing before the board.
+function prepWarnings(players) {
+  const picked = players.flatMap(p => [...p.lockedItems, ...p.fillItems]);
+  return Object.keys(KIND_REQUIREMENT).map(kind => {
+    const n = picked.filter(it => it.kind === kind).length;
+    return n ? `${KIND_REQUIREMENT[kind]} - ${n} ${n === 1 ? 'container' : 'containers'} in this plan` : null;
+  }).filter(Boolean);
+}
+
 function renderResultsTab(pool) {
   const { players, bonusActive, totalValue } = computeCrewPlan(pool, state.playerCount, state.buyerRequests);
   let html = '';
+
+  const warnings = prepWarnings(players);
+  if (warnings.length) {
+    html += `<div class="warn-box"><div class="warn-title">Prep required</div>
+      ${warnings.map(w => `<div class="warn-line">${esc(w)}</div>`).join('')}
+      <div class="warn-foot">Host sources the tools.</div></div>`;
+  }
+
   if (state.playerCount > 1) {
-    html += `<div class="note-box">Each player is auto-assigned one home area (the Upper Gallery and Crisp Gallery count as one space) to cut down on backtracking, topping off from elsewhere only once their area runs dry. Crisp Gallery needs someone to hold the door - that player gets none of its loot, chosen automatically for best total value.</div>`;
+    html += `<div class="note-box">Each player gets a run of neighbouring areas to clear, so their list is a short walk rather than a lap of the building. They fill up from their own patch first and only reach outside it once that runs dry, which costs the crew a few percent against letting everyone cherry-pick the whole map - the trade is less backtracking. Crisp Gallery needs someone to hold the door: that player gets none of its loot, chosen automatically for the best total.</div>`;
   }
   html += `<div class="hint">${state.buyerRequests.length}/3 Buyer's Requests selected (marked with * below) - auto-fulfilled by whichever player has room</div>`;
-  html += `<div class="hint">Picks maximize total cash, not item count or headline price - bag space is the real currency. Paintings look big but cost 50% of a bag, so they lose to smaller loot with a higher per-1% return (shown under each row).</div>`;
+  html += `<div class="hint">Within each patch the picks maximize cash, not item count or headline price - bag space is the real currency. Paintings look big but cost 50% of a bag, so they lose to smaller loot with a higher per-1% return (shown under each row).</div>`;
 
   players.forEach(p => {
-    // Ordered as a walking route: location in run order, then item type within a location,
-    // then Buyer's Requests ahead of ordinary loot of that same type so they aren't missed.
+    // Ordered as a walking route: cluster in run order, then spot order within the cluster - which
+    // is the order you physically pass them, so the list reads top to bottom as you move.
     const rows = [
       ...p.lockedItems.map(it => ({ ...it, isLocked: true })),
       ...p.fillItems.map(it => ({ ...it, isLocked: false })),
     ].sort((a, b) => {
       if (a.locationOrder !== b.locationOrder) return a.locationOrder - b.locationOrder;
-      const ka = KIND_PROXIMITY_ORDER[a.kind] ?? 9, kb = KIND_PROXIMITY_ORDER[b.kind] ?? 9;
-      if (ka !== kb) return ka - kb;
-      if (a.isLocked !== b.isLocked) return a.isLocked ? -1 : 1;
+      if (a.spot !== b.spot) return a.spot - b.spot;
       return b.value - a.value;
     });
-    const clusterLabel = p.cluster ? CLUSTER_LABEL[p.cluster] : '';
-    const hackerNote = p.isHacker ? 'Crisp Gallery Hacker - no Crisp loot' : '';
-    const subLine = [clusterLabel, hackerNote].filter(Boolean).join(' - ');
+    // Named by its ends - "Back Exit → North Hall" is the instruction; the clusters between are
+    // implied by the route order and listed out in the rows below anyway.
+    const patchLabel = state.playerCount > 1 && p.patch && p.patch.length
+      ? (p.patch.length === 1
+          ? CLUSTER_LABEL[p.patch[0]]
+          : `${CLUSTER_LABEL[p.patch[0]]} → ${CLUSTER_LABEL[p.patch[p.patch.length - 1]]}`)
+      : '';
+    // Joined with a middot, not a dash - the cluster labels contain dashes of their own.
+    const hackerNote = p.isHacker ? 'Crisp Gallery Hacker, no Crisp loot' : '';
+    const subLine = [patchLabel, hackerNote].filter(Boolean).join(' · ');
 
     html += `<div class="card">
       <div class="p-head"><div class="p-name">Player ${p.num}</div>
