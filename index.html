@@ -232,7 +232,9 @@ const BUYER_REQUEST_BONUS = 50000;
 
 // Loot is grouped by where it physically sits, not by what kind of container it's in. The clusters
 // below are the rooms and runs the spawn map actually separates - each one is a spot you stand in
-// and clear before moving on, so a cluster is both how you scout it and how a player is assigned it.
+// and clear before moving on, so a cluster is how you scout it and how a player's route is ordered.
+//
+// Clusters are NOT what a player is assigned - see FLOORS. They shape the walk; they never fence it.
 //
 // Listed in walking order, which is what makes proximity computable: two clusters that are adjacent
 // here are adjacent in the building, so |index difference| stands in for distance.
@@ -258,23 +260,33 @@ function clusterDistance(a, b) {
   if (a === null || b === null) return 0; // pass-through areas are free for everyone
   return Math.abs(CLUSTER_INDEX[a] - CLUSTER_INDEX[b]);
 }
-// A player's patch is a run of neighbouring clusters, so "how far is this item" is the distance to
-// the nearest cluster they already own - zero for anything inside the patch.
+// A player's patch is the set of clusters on their floor, so "how far is this item" is the distance
+// to the nearest cluster they already cover - zero for anything on their own floor.
 function distanceToPatch(cluster, patch) {
   if (cluster === null || !patch || !patch.length) return 0;
   return Math.min(...patch.map(c => clusterDistance(cluster, c)));
 }
-// Every way to cut a route into `parts` contiguous, non-empty runs. Contiguity is what makes a patch
-// walkable: the cluster order is a real path through the building, so neighbours here are neighbours
-// there. It also keeps the search tiny - 4 players over 7 clusters is 20 cuts, not 7^4 assignments.
-function segmentations(list, parts) {
-  const out = [];
-  (function cut(start, remaining, acc) {
-    if (remaining === 1) { out.push([...acc, list.slice(start)]); return; }
-    for (let end = start + 1; end <= list.length - (remaining - 1); end++) {
-      cut(end, remaining - 1, [...acc, list.slice(start, end)]);
-    }
-  })(0, parts, []);
+
+// The floor is what a player is actually assigned, and it's the only boundary that binds. Clusters
+// inside a floor are a convenience for scouting and for ordering the walk - a player is free to take
+// anything on their floor, in any cluster, so a rich cluster is never fenced off from whoever is
+// standing on it. Crossing to another FLOOR is the thing worth avoiding, and the only thing the
+// plan tries to avoid.
+const FLOORS = [
+  { id: 'lower_back', label: 'Lower Gallery - Back Exit',      clusters: ['backexit'] },
+  { id: 'lower',      label: 'Lower Gallery',                  clusters: ['south', 'westarm', 'north'] },
+  { id: 'upper',      label: 'Upper Gallery / Crisp Gallery',  clusters: ['westcor', 'eastwall', 'crisp'] },
+];
+const FLOOR_IDS = FLOORS.map(f => f.id);
+const FLOOR_CLUSTERS = {};
+const FLOOR_LABEL = {};
+FLOORS.forEach(f => { FLOOR_CLUSTERS[f.id] = f.clusters; FLOOR_LABEL[f.id] = f.label; });
+// A null floor means the whole building - solo, where there is nobody to divide it with.
+function patchFor(floorId) { return floorId === null ? ASSIGNABLE_CLUSTERS : FLOOR_CLUSTERS[floorId]; }
+// Every floor assignment, repeats allowed: with more players than floors, two of them share one.
+function floorAssignments(playerCount) {
+  let out = [[]];
+  for (let i = 0; i < playerCount; i++) out = out.flatMap(prefix => FLOOR_IDS.map(f => [...prefix, f]));
   return out;
 }
 
@@ -562,7 +574,8 @@ function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests
 
   const players = [];
   for (let i = 0; i < playerCount; i++) {
-    const patch = clusterAssign[i];
+    const floorId = clusterAssign[i];
+    const patch = patchFor(floorId);
     const locked = lockedByPlayer[i];
     const lockedPct = locked.reduce((s, it) => s + it.pct, 0);
     const lockedValue = locked.reduce((s, it) => s + it.value, 0);
@@ -573,13 +586,14 @@ function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests
     let own, top;
 
     if (patchFirst) {
-      // FASTEST. Clear your own patch, then top off from outside it with whatever bag is left. Two
-      // passes rather than one knapsack over everything, because proximity has to actually cost
+      // FASTEST. Work your own floor, then cross to another one only with whatever bag is left over.
+      // Two passes rather than one knapsack over everything, because proximity has to actually cost
       // something to matter: as a tie-break it never fires (item values are rarely exactly equal)
       // and every player just converges on the same richest loot wherever it sits, which makes the
-      // area assignment describe nothing. Here the patch binds - a little value for a shorter walk.
+      // assignment describe nothing.
       //
-      // Vault and Garage count as "own patch" for everyone - they're on the way in regardless.
+      // The whole floor is in reach here, every cluster on it - clusters order the walk, they don't
+      // ration it. Vault and Garage count as "own floor" for everyone; they're on the way regardless.
       const inPatch = available.filter(it => distanceToPatch(it.cluster, patch) === 0);
       const outside = available.filter(it => distanceToPatch(it.cluster, patch) > 0);
       own = knapsack(sortByDistanceFrom(inPatch, patch), capacity);
@@ -601,7 +615,7 @@ function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests
     // so 30% one room over beats 30% across the map.
     const spillPct = fillItems.reduce((s, it) => s + it.pct * distanceToPatch(it.cluster, patch), 0);
 
-    players.push({ num: i + 1, patch, isHacker: i === hackerIdx, lockedItems: locked, fillItems, value: own.value + top.value + lockedValue, pctUsed: own.pct + top.pct + lockedPct, spillPct });
+    players.push({ num: i + 1, floorId, patch, isHacker: i === hackerIdx, lockedItems: locked, fillItems, value: own.value + top.value + lockedValue, pctUsed: own.pct + top.pct + lockedPct, spillPct });
   }
   const bonusActive = fulfilledCount === MAX_BUYER_REQUESTS && validRequests.length === MAX_BUYER_REQUESTS;
   const totalValue = players.reduce((s, p) => s + p.value, 0) + (bonusActive ? BUYER_REQUEST_BONUS : 0);
@@ -617,25 +631,20 @@ function computeCrewPlan(pool, playerCount, buyerRequestIds, patchFirst) {
 
   // Solo owns the whole route, so both modes collapse to the same single value-maximizing pass.
   if (playerCount <= 1) {
-    return evaluatePlan(pool, 1, [ASSIGNABLE_CLUSTERS], null, validRequests, patchFirst);
+    return evaluatePlan(pool, 1, [null], null, validRequests, patchFirst);
   }
 
-  // Brute-force every way of cutting the route into per-player patches x Hacker choice, keeping the
-  // best plan in strict priority:
+  // Brute-force every floor assignment x Hacker choice, keeping the best plan in strict priority:
   //  1. Fulfill as many Buyer's Requests as physically possible - always takes priority.
   //  2. Maximize total crew value.
-  //  3. Least total distance-weighted spillover (stay in your own patch when the value ties).
-  //
-  // Patches are contiguous runs rather than free assignments of single clusters. A run is what you
-  // can actually be told to clear ("Back Exit through South Hall"), and it stops the solver handing
-  // someone a one-item area just because it sits centrally on the route.
+  //  3. Least total distance-weighted spillover (stay on your own floor when the value ties).
   let best = null;
   const hackerCandidates = [null, ...Array.from({ length: playerCount }, (_, i) => i)];
-  segmentations(ASSIGNABLE_CLUSTERS, playerCount).forEach(assign => {
+  floorAssignments(playerCount).forEach(assign => {
     hackerCandidates.forEach(hackerIdx => {
-      // The Hacker avoids owning Crisp Gallery when possible - they're stuck at the door, so those
-      // items only reach them as a genuine last-resort spillover.
-      if (hackerIdx !== null && assign[hackerIdx].includes('crisp')) return;
+      // The Hacker avoids the floor holding Crisp Gallery when possible - they're stuck at the door,
+      // so those items only reach them as a genuine last-resort spillover.
+      if (hackerIdx !== null && FLOOR_CLUSTERS[assign[hackerIdx]].includes('crisp')) return;
       const result = evaluatePlan(pool, playerCount, assign, hackerIdx, validRequests, patchFirst);
       const better = !best
         || result.fulfilledCount > best.fulfilledCount
@@ -881,8 +890,8 @@ function renderResultsTab(pool) {
   if (crew) {
     const shortfall = payoutPlan.totalValue - fastestPlan.totalValue;
     html += `<div class="note-box">${mode === 'fastest'
-      ? `Each player gets a run of neighbouring areas to clear, so their list is a short walk rather than a lap of the building. They fill up from their own patch first and only reach outside it once that runs dry${shortfall > 0 ? `, which is what costs $${fmtK(shortfall)}k against the highest-payout plan` : ''} - the trade is less backtracking.`
-      : `Every player takes the richest loot left anywhere in the building, so the bags are worth as much as they can be. Nobody is held to an area, so expect crossing paths and backtracking${shortfall > 0 ? ` - the Fastest plan gives up $${fmtK(shortfall)}k to avoid it` : ''}.`
+      ? `Each player works one floor and takes anything on it, in any order that suits - the areas below only set the walking order, they don't ration who gets what. Crossing to another floor happens only once a player's own floor can't fill their bag${shortfall > 0 ? `, which is what costs $${fmtK(shortfall)}k against the highest-payout plan` : ''}.`
+      : `Every player takes the richest loot left anywhere in the building, so the bags are worth as much as they can be. Nobody is held to a floor, so expect crossing paths and backtracking${shortfall > 0 ? ` - the Fastest plan gives up $${fmtK(shortfall)}k to avoid it` : ''}.`
     } Crisp Gallery needs someone to hold the door: that player gets none of its loot, chosen automatically for the best total.</div>`;
   }
   html += `<div class="hint">${state.buyerRequests.length}/3 Buyer's Requests selected (marked with * below) - auto-fulfilled by whichever player has room</div>`;
@@ -899,14 +908,9 @@ function renderResultsTab(pool) {
       if (a.spot !== b.spot) return a.spot - b.spot;
       return b.value - a.value;
     });
-    // Named by its ends - "Back Exit → North Hall" is the instruction; the clusters between are
-    // implied by the route order and listed out in the rows below anyway. Only shown on the Fastest
-    // plan: under Highest payout the patch doesn't hold anyone, so naming one would be a fiction.
-    const patchLabel = mode === 'fastest' && crew && p.patch && p.patch.length
-      ? (p.patch.length === 1
-          ? CLUSTER_LABEL[p.patch[0]]
-          : `${CLUSTER_LABEL[p.patch[0]]} → ${CLUSTER_LABEL[p.patch[p.patch.length - 1]]}`)
-      : '';
+    // The floor is the assignment, so the floor is what gets named. Only shown on the Fastest plan:
+    // under Highest payout nothing holds a player to a floor, so naming one would be a fiction.
+    const patchLabel = mode === 'fastest' && crew && p.floorId ? FLOOR_LABEL[p.floorId] : '';
     // Joined with a middot, not a dash - the cluster labels contain dashes of their own.
     const hackerNote = p.isHacker ? 'Crisp Gallery Hacker, no Crisp loot' : '';
     const subLine = [patchLabel, hackerNote].filter(Boolean).join(' · ');
