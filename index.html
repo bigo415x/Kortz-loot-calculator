@@ -52,9 +52,6 @@
              align-self:stretch; min-height:32px; }
   .pl-pick select { position:absolute; inset:0; width:100%; height:100%; opacity:0; border:none;
                     background:transparent; font-size:16px; }
-  .pl-num { flex:none; min-width:23px; height:19px; padding:0 4px; border-radius:5px; font-size:10.5px;
-            font-weight:600; display:flex; align-items:center; justify-content:center;
-            background:rgba(145,132,217,0.2); color:var(--accent); font-variant-numeric:tabular-nums; }
   .pl-name { flex:1; min-width:0; font-size:12.5px; font-weight:500;
              white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .pl-caret { flex:none; font-size:8px; color:var(--muted2); }
@@ -126,7 +123,7 @@
   </div>
   <div class="body" id="body"></div>
   <div class="footer">
-    GTA Online - The Kortz Center Heist. Spot numbers, spawn contents, bag %s &amp; value ranges are community data;
+    GTA Online - The Kortz Center Heist. Spawn contents, bag %s &amp; value ranges are community data;
     correct anything your scouted run disagrees with.<br>
     Your entries auto-save to this browser/device - Reset clears them for good.
   </div>
@@ -358,10 +355,11 @@ function getDepositBoxes() {
   return state.depositBoxes || Array.from({ length: DEFAULTS.vaultDepositBoxes }, () => 7500);
 }
 
-// Every loot spot in the Kortz Center is fixed run to run: spot #14 is always a bracelet case,
-// spot #19 is always the same painting. This table is that spawn map - `n` is the spot's number on
-// the community map so the number on your phone matches the number you're reading off the map, and
-// `item` is what actually spawns there, so nothing needs picking from a 29-item list by default.
+// Every loot spot in the Kortz Center is fixed run to run, so `item` is what actually spawns at
+// each one and nothing needs picking out of a 29-item list by default. `n` is the spot's number on
+// the community spawn map: it isn't shown in the app (a bare number means nothing without the map
+// in front of you), but it's kept here so this table can be checked against the map, and entries
+// are listed in that order because it's roughly the order you walk past them.
 //
 // Where the game varies the variant but not the money, the variant here is just a placeholder:
 // every Gemstone / Venus / Horse / Necklace / Skull shares one value range and bag weight, so the
@@ -610,7 +608,7 @@ function renderItemsTab(pool, poolTotalValue) {
   const defaultItemKeys = computeDefaultItemKeys();
   const depositBoxes = getDepositBoxes();
   let html = `<div class="hint">${pool.length} items in play - $${fmtK(poolTotalValue)}k total pool value</div>
-    <div class="hint">Numbers match the community spawn map. Each spot is pre-set to what normally spawns there - tap an item name to change it, tap its value to type an exact number, ★ marks a Buyer's Request.</div>`;
+    <div class="hint">Each spot is pre-set to what normally spawns there, grouped the way you walk past them - tap an item name to change it, tap its value to type an exact number, ★ marks a Buyer's Request.</div>`;
 
   // Every section is always listed - you scope the Crisp Gallery on setup missions regardless of
   // crew size, so its values are always worth recording. Player count only gates the Results tab.
@@ -663,8 +661,6 @@ function renderItemsTab(pool, poolTotalValue) {
 // (drag, nudge, or type). Nothing that isn't needed every run gets a row of its own.
 function renderPlacement(pl, sec, defaultItemKeys) {
   const categoryId = KIND_TO_CATEGORY[pl.kind];
-  const spotNum = SPOTS[pl.id] ? SPOTS[pl.id].n : null;
-  const numBadge = spotNum ? `<span class="pl-num">${spotNum}</span>` : '';
 
   if (pl.kind === 'crate') {
     const item = getCategory(categoryId).items[0];
@@ -700,11 +696,11 @@ function renderPlacement(pl, sec, defaultItemKeys) {
   });
 
   let h = `<div class="placement"><div class="pl-row">
-    <div class="pl-pick">${numBadge}
+    <div class="pl-pick">
       <span class="pl-name" style="opacity:${empty ? 0.4 : 1}">${esc(shortLabel(item))}</span>
       <span class="pl-caret">▼</span>
       <select data-act="item" data-id="${pl.id}" data-cat="${categoryId}"
-        aria-label="Item at spot ${spotNum || ''}">${opts}</select>
+        aria-label="Change item">${opts}</select>
     </div>
     <span class="pl-pct">${item.bagWeightPercent}%</span>
     <button class="chip${empty ? ' on' : ''}" data-act="empty" data-id="${pl.id}">Empty</button>`;
