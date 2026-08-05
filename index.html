@@ -498,13 +498,31 @@ function shareUrl() { return location.href.split('#')[0] + '#plan=' + encodePlan
 
 // True only for the load that came in on a link, so the banner marks the hand-off and then goes away.
 let openedFromShare = false;
+
+// A shared link is applied ONCE per device, and which one was applied is remembered rather than
+// inferred from the URL. Stripping the fragment with replaceState is not enough on its own: inside
+// a sandboxed iframe or an in-app browser - which is exactly where a link from a chat app opens -
+// replaceState is blocked, the fragment survives every reload, and the plan gets re-applied on top
+// of whatever the recipient has since changed. Their edits save correctly and are then overwritten
+// on the next load, which reads as the plan being welded shut.
+//
+// Remembering the token fixes it wherever the URL can't be rewritten, and still lets a NEW link
+// through, so a host who re-shares an updated plan is picked up as normal.
+const APPLIED_SHARE_KEY = 'kortzLootCalculatorOpenedShare_v1';
 function applySharedPlan() {
   const m = /[#&]plan=([A-Za-z0-9\-_]+)/.exec(location.hash);
   if (!m) return false;
+  const token = m[1];
+  let alreadyOpened = null;
+  try { alreadyOpened = localStorage.getItem(APPLIED_SHARE_KEY); } catch (e) { /* storage off */ }
+  // Same link as last time: this is a reload, not a hand-off. Their own edits win.
+  if (alreadyOpened === token) return false;
+
   let ok = false;
-  try { ok = decodePlan(m[1]); } catch (e) { ok = false; }
-  // Drop the fragment either way, so a later edit isn't silently undone by a refresh.
-  try { history.replaceState(null, '', location.href.split('#')[0]); } catch (e) { /* file:// - harmless */ }
+  try { ok = decodePlan(token); } catch (e) { ok = false; }
+  if (ok) { try { localStorage.setItem(APPLIED_SHARE_KEY, token); } catch (e) { /* storage off */ } }
+  // Still worth dropping the fragment where it's allowed - a clean URL is easier to re-share.
+  try { history.replaceState(null, '', location.href.split('#')[0]); } catch (e) { /* blocked - handled above */ }
   return ok;
 }
 
@@ -810,7 +828,13 @@ function setResultMode(m) { state.resultMode = m; saveState(); render(); }
 // No re-render: the name is a label, and redrawing mid-word would take the keyboard away.
 function setPlayerName(num, name) { state.playerNames[num] = name; saveState(); }
 function setPlayerCount(n) { state.playerCount = n; saveState(); render(); }
-function resetAll() { state.slots = {}; state.depositBoxes = null; state.buyerRequests = []; state.pickedUp = {}; saveState(); render(); }
+function resetAll() {
+  state.slots = {}; state.depositBoxes = null; state.buyerRequests = []; state.pickedUp = {};
+  // Forget which link was opened too, so re-opening it after a Reset loads the plan again rather
+  // than being mistaken for a reload.
+  try { localStorage.removeItem(APPLIED_SHARE_KEY); } catch (e) { /* storage off */ }
+  saveState(); render();
+}
 function togglePickedUp(id) { state.pickedUp[id] = !state.pickedUp[id]; saveState(); render(); }
 function toggleCollapse(id) { state.collapsed[id] = !state.collapsed[id]; saveState(); render(); }
 function toggleEmpty(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, empty: !cur.empty }; saveState(); render(); }
@@ -1244,6 +1268,12 @@ loadState();
 // A link wins over whatever this device had saved - opening one is asking to see that plan.
 if (applySharedPlan()) { openedFromShare = true; state.tab = 'results'; saveState(); }
 render();
+
+// Opening a second link while the page is already up only changes the fragment, which the browser
+// treats as same-document - nothing reloads, so the plan would otherwise never be picked up.
+window.addEventListener('hashchange', () => {
+  if (applySharedPlan()) { openedFromShare = true; state.tab = 'results'; saveState(); render(); }
+});
 </script>
 </body>
 </html>
