@@ -44,6 +44,16 @@
   .sub-label { font-size:12.5px; font-weight:500; color:rgba(233,233,237,0.85); }
   .placement { display:flex; flex-direction:column; gap:2px; padding:4px 0; border-bottom:1px solid var(--line-soft); }
   .placement:last-child { border-bottom:none; }
+  /* Done spots recede but stay readable - you still want to check what you entered. */
+  .placement.scoped .pl-name, .placement.scoped .pl-pct { opacity:0.5; }
+  .placement.scoped .slider-row { opacity:0.6; }
+  .scout-box { flex:none; margin:0; }
+  .scout-head { display:flex; flex-direction:column; gap:5px; background:var(--card); border-radius:8px; padding:9px 10px; }
+  .scout-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .scout-count { font-size:12.5px; font-weight:500; font-variant-numeric:tabular-nums; }
+  .scout-clear { flex:none; min-height:28px; padding:0 9px; border-radius:7px; border:1px solid var(--line);
+                 background:transparent; color:var(--muted); font-size:10.5px; cursor:pointer; }
+  .sec-done { color:var(--accent); }
   .pl-row { display:flex; align-items:center; gap:6px; min-height:32px; }
   /* The item name doubles as the picker: a transparent native <select> sits on top of it, so one
      tap opens the phone's own wheel/list instead of a custom in-page menu. It stretches to the full
@@ -490,7 +500,10 @@ function decodePlan(encoded) {
   state.buyerRequests = (Array.isArray(o.b) ? o.b : [])
     .map(i => (placements[i] || {}).id).filter(Boolean).slice(0, MAX_BUYER_REQUESTS);
   state.playerNames = (o.p && typeof o.p === 'object') ? o.p : {};
+  // Both trackers are about your own walk through the building, not the sender's, so a handed-over
+  // plan arrives with them clear rather than carrying ticks against loot you never looked at.
   state.pickedUp = {};
+  state.scoped = {};
   return true;
 }
 
@@ -534,6 +547,7 @@ const state = {
   collapsed: {},      // sectionId -> bool
   buyerRequests: [],  // [itemId, ...] - heist-wide, auto-fulfilled by whichever player has room
   pickedUp: {},       // itemId -> bool - mid-run progress tracker, does not affect the math
+  scoped: {},         // placementId -> bool - scouting checklist, does not affect the math
   resultMode: 'payout', // 'payout' = richest bags anywhere | 'fastest' = stay in your own area
   playerNames: {},    // player number -> gamertag, blank falls back to "Player N"
 };
@@ -579,6 +593,15 @@ function getClusters() {
   return CLUSTERS.map(c => ({ ...c, note: CLUSTER_NOTE[c.id], placements: byCluster[c.id] }));
 }
 function spotOrder(id) { return SPOTS[id] ? SPOTS[id].n : 99; }
+
+// Everything a player has to walk up to and look at, including the deposit boxes.
+function clusterScoutIds(sec) {
+  const ids = sec.placements.map(pl => pl.id);
+  if (sec.id === 'vault') getDepositBoxes().forEach((_, i) => ids.push('vault_depositbox_' + i));
+  return ids;
+}
+function allScoutIds() { return getClusters().reduce((acc, sec) => acc.concat(clusterScoutIds(sec)), []); }
+function scoutedCount(ids) { return ids.filter(id => state.scoped[id]).length; }
 
 function getDepositBoxes() {
   return state.depositBoxes || Array.from({ length: DEFAULTS.vaultDepositBoxes }, () => 7500);
@@ -829,21 +852,54 @@ function setResultMode(m) { state.resultMode = m; saveState(); render(); }
 function setPlayerName(num, name) { state.playerNames[num] = name; saveState(); }
 function setPlayerCount(n) { state.playerCount = n; saveState(); render(); }
 function resetAll() {
-  state.slots = {}; state.depositBoxes = null; state.buyerRequests = []; state.pickedUp = {};
+  state.slots = {}; state.depositBoxes = null; state.buyerRequests = []; state.pickedUp = {}; state.scoped = {};
   // Forget which link was opened too, so re-opening it after a Reset loads the plan again rather
   // than being mistaken for a reload.
   try { localStorage.removeItem(APPLIED_SHARE_KEY); } catch (e) { /* storage off */ }
   saveState(); render();
 }
 function togglePickedUp(id) { state.pickedUp[id] = !state.pickedUp[id]; saveState(); render(); }
+function toggleScoped(id) { state.scoped[id] = !state.scoped[id]; saveState(); render(); }
+// Clears the ticks only - the scouted values stay, so a second run round the building starts from
+// last run's readings rather than from nothing.
+function clearScoped() { state.scoped = {}; saveState(); render(); }
+
+// Editing a spot IS scouting it, so the tick follows the work instead of being a second chore.
+// Slider drags don't re-render (that would fight the thumb), so the row and the counters are
+// nudged in place here rather than being redrawn.
+function markScoped(id) {
+  if (state.scoped[id]) return;
+  state.scoped[id] = true;
+  saveState();
+  const box = bodyEl.querySelector(`input[data-act="scoped"][data-id="${CSS.escape(id)}"]`);
+  if (box) {
+    box.checked = true;
+    const row = box.closest('.placement');
+    if (row) row.classList.add('scoped');
+  }
+  refreshScoutCounts();
+}
+function refreshScoutCounts() {
+  getClusters().forEach(sec => {
+    const el = bodyEl.querySelector(`[data-scout="${sec.id}"]`);
+    if (el) el.textContent = scoutTally(clusterScoutIds(sec));
+  });
+  const ids = allScoutIds(), done = scoutedCount(ids);
+  const label = bodyEl.querySelector('[data-scout="all"]');
+  if (label) label.textContent = `${done} of ${ids.length} spots scoped`;
+  const fill = bodyEl.querySelector('[data-scout-bar]');
+  if (fill) fill.style.width = (ids.length ? (100 * done / ids.length) : 0) + '%';
+}
+function scoutTally(ids) { return `${scoutedCount(ids)}/${ids.length}`; }
 function toggleCollapse(id) { state.collapsed[id] = !state.collapsed[id]; saveState(); render(); }
-function toggleEmpty(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, empty: !cur.empty }; saveState(); render(); }
-function toggleSkip(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, skip: !cur.skip }; saveState(); render(); }
+function toggleEmpty(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, empty: !cur.empty }; state.scoped[id] = true; saveState(); render(); }
+function toggleSkip(id) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, skip: !cur.skip }; state.scoped[id] = true; saveState(); render(); }
 function setItemKey(id, categoryId, itemName) {
   const item = findItem(categoryId, itemName); const cur = state.slots[id] || {};
-  state.slots[id] = { ...cur, empty: false, itemKey: itemName, value: itemMid(item) }; saveState(); render();
+  state.slots[id] = { ...cur, empty: false, itemKey: itemName, value: itemMid(item) };
+  state.scoped[id] = true; saveState(); render();
 }
-function setValue(id, val) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, value: val }; saveState(); }
+function setValue(id, val) { const cur = state.slots[id] || {}; state.slots[id] = { ...cur, value: val }; markScoped(id); saveState(); }
 function addDepositBox() { const arr = getDepositBoxes(); state.depositBoxes = [...arr, 7500]; saveState(); render(); }
 function removeDepositBox(idx) {
   const arr = getDepositBoxes();
@@ -855,7 +911,10 @@ function removeDepositBox(idx) {
   state.depositBoxes = arr.filter((_, i) => i !== idx);
   saveState(); render();
 }
-function setDepositBoxValue(idx, val) { const arr = getDepositBoxes().slice(); arr[idx] = val; state.depositBoxes = arr; saveState(); }
+function setDepositBoxValue(idx, val) {
+  const arr = getDepositBoxes().slice(); arr[idx] = val; state.depositBoxes = arr;
+  markScoped('vault_depositbox_' + idx); saveState();
+}
 function toggleBuyerRequest(id) {
   const exists = state.buyerRequests.includes(id);
   if (exists) { state.buyerRequests = state.buyerRequests.filter(x => x !== id); saveState(); render(); return; }
@@ -887,17 +946,26 @@ function render() {
 function renderItemsTab(pool, poolTotalValue) {
   const defaultItemKeys = computeDefaultItemKeys();
   const depositBoxes = getDepositBoxes();
+  const scoutIds = allScoutIds();
+  const scoutDone = scoutedCount(scoutIds);
   let html = `<div class="hint">${pool.length} items in play - $${fmtK(poolTotalValue)}k total pool value</div>
-    <div class="hint">Grouped by where the loot physically sits, in the order you walk past it. Each spot is pre-set to what normally spawns there - tap an item name to change it, tap its value to type an exact number, ★ marks a Buyer's Request.</div>`;
+    <div class="scout-head">
+      <div class="scout-row"><span class="scout-count" data-scout="all">${scoutDone} of ${scoutIds.length} spots scoped</span>
+        ${scoutDone ? `<button class="scout-clear" data-act="clear-scoped">Clear ticks</button>` : ''}</div>
+      <div class="bar"><div class="bar-fill" data-scout-bar style="width:${scoutIds.length ? (100 * scoutDone / scoutIds.length) : 0}%"></div></div>
+    </div>
+    <div class="hint">Tick a spot once you've checked it in game. Setting a value, changing the item or marking it Empty ticks it for you. Tap an item name to change it, tap its value to type an exact number, ★ marks a Buyer's Request.</div>`;
 
   // Every cluster is always listed - you scope the Crisp Gallery on setup missions regardless of
   // crew size, so its values are always worth recording. Player count only gates the Results tab.
   getClusters().forEach(sec => {
     const collapsed = !!state.collapsed[sec.id];
     const lockedOut = sec.crew && state.playerCount < 2;
+    const secIds = clusterScoutIds(sec);
+    const secDone = scoutedCount(secIds) === secIds.length && secIds.length > 0;
     html += `<div class="card"><button class="sec-toggle" data-act="collapse" data-id="${sec.id}">
-      <span class="sec-label">${esc(sec.label)}</span>
-      <span class="sec-chevron">${sec.placements.length ? `${sec.placements.length} &middot; ` : ''}${collapsed ? '▸ show' : '▾ hide'}</span></button>`;
+      <span class="sec-label">${secDone ? '<span class="sec-done">✓</span> ' : ''}${esc(sec.label)}</span>
+      <span class="sec-chevron"><span data-scout="${sec.id}">${scoutTally(secIds)}</span> &middot; ${collapsed ? '▸ show' : '▾ hide'}</span></button>`;
     if (!collapsed) {
       if (lockedOut) html += `<div class="sec-note">Needs 2+ players - values save, but stay out of solo results</div>`;
       if (sec.note) html += `<div class="sec-note">${esc(sec.note)}</div>`;
@@ -933,11 +1001,11 @@ function renderPlacement(pl, sec, defaultItemKeys) {
     const slot = state.slots[pl.id] || {};
     const skip = !!slot.skip;
     const value = slot.value !== undefined ? slot.value : item.valueMin;
-    let h = `<div class="placement"><div class="pl-row">
+    let h = `<div class="placement${state.scoped[pl.id] ? ' scoped' : ''}"><div class="pl-row">
+      ${scoutBox(pl.id)}
       <div class="pl-pick"><span class="pl-name">${esc(item.itemName)}</span></div>
-      <span class="pl-pct">${item.bagWeightPercent}%</span>
       <button class="chip${skip ? ' on' : ''}" data-act="skip" data-id="${pl.id}">Skip</button></div>`;
-    if (!skip) h += valueRow(pl.id, item.valueMin, item.valueMax, item.valueIncrement || 5000, value);
+    if (!skip) h += valueRow(pl.id, item.valueMin, item.valueMax, item.valueIncrement || 5000, value, false, item.bagWeightPercent);
     return h + `</div>`;
   }
 
@@ -961,14 +1029,14 @@ function renderPlacement(pl, sec, defaultItemKeys) {
     opts += `</optgroup>`;
   });
 
-  let h = `<div class="placement"><div class="pl-row">
+  let h = `<div class="placement${state.scoped[pl.id] ? ' scoped' : ''}"><div class="pl-row">
+    ${scoutBox(pl.id)}
     <div class="pl-pick">
       <span class="pl-name" style="opacity:${empty ? 0.4 : 1}">${esc(shortLabel(item))}</span>
       <span class="pl-caret">▼</span>
       <select data-act="item" data-id="${pl.id}" data-cat="${categoryId}"
         aria-label="Change item">${opts}</select>
     </div>
-    <span class="pl-pct">${item.bagWeightPercent}%</span>
     <button class="chip${empty ? ' on' : ''}" data-act="empty" data-id="${pl.id}">Empty</button>`;
   // Buyer's Requests are heist-wide - the crew auto-decides who ends up carrying it.
   if (!empty) {
@@ -977,28 +1045,38 @@ function renderPlacement(pl, sec, defaultItemKeys) {
   }
   h += `</div>`;
 
-  if (!empty) h += valueRow(pl.id, item.valueMin, item.valueMax, item.valueIncrement || 500, value);
+  if (!empty) h += valueRow(pl.id, item.valueMin, item.valueMax, item.valueIncrement || 500, value, false, item.bagWeightPercent);
   return h + `</div>`;
+}
+
+// The scouting tick. Deliberately the leftmost thing on the row, so a column of them reads as a
+// checklist while you walk - which is the whole point of it.
+function scoutBox(id) {
+  return `<input type="checkbox" class="scout-box" data-act="scoped" data-id="${esc(id)}"
+    ${state.scoped[id] ? 'checked' : ''} aria-label="Mark this spot scoped"/>`;
 }
 
 function renderDepositBox(idx, val, showRemove) {
   const id = `vault_depositbox_${idx}`;
   const empty = !!(state.slots[id] && state.slots[id].empty);
-  let h = `<div class="placement"><div class="pl-row">
+  let h = `<div class="placement${state.scoped[id] ? ' scoped' : ''}"><div class="pl-row">
+    ${scoutBox(id)}
     <div class="pl-pick"><span class="pl-name" style="opacity:${empty ? 0.4 : 1}">Deposit Box ${idx + 1}</span></div>
-    <span class="pl-pct">5%</span>
     <button class="chip${empty ? ' on' : ''}" data-act="empty" data-id="${id}">Empty</button>`;
   if (showRemove) h += `<button class="pl-remove" data-act="remove-deposit" data-idx="${idx}">Remove</button>`;
   h += `</div>`;
-  if (!empty) h += valueRow(id, 5000, 12500, 500, val, true);
+  if (!empty) h += valueRow(id, 5000, 12500, 500, val, true, 5);
   return h + `</div>`;
 }
 
 // The typed field carries thousands ("41.5" = $41.5k) because that's how the values read in game,
 // and it's a single tap + two keystrokes instead of hunting for an exact stop on a phone-width slider.
-function valueRow(id, min, max, step, value, isDeposit) {
+function valueRow(id, min, max, step, value, isDeposit, pct) {
   const idxAttr = isDeposit ? `data-idx="${id.replace('vault_depositbox_', '')}"` : '';
+  // Bag weight lives here rather than up on the name line: it qualifies the number, and the name
+  // line needs every pixel now that the checklist tick sits at its left.
   return `<div class="slider-row">
+    <span class="pl-pct">${pct}%</span>
     <button class="step-btn" data-act="step" data-dir="-1" data-target="${esc(id)}" aria-label="Decrease">&minus;</button>
     <input type="range" min="${min}" max="${max}" step="${step}" value="${value}"
       data-act="${isDeposit ? 'deposit-slide' : 'slide'}" data-id="${esc(id)}" ${idxAttr}/>
@@ -1227,6 +1305,8 @@ function attachListeners() {
     else if (act === 'item') el.addEventListener('change', e => setItemKey(id, el.dataset.cat, e.target.value));
     else if (act === 'buyer') el.addEventListener('click', () => toggleBuyerRequest(id));
     else if (act === 'picked') el.addEventListener('change', () => togglePickedUp(id));
+    else if (act === 'scoped') el.addEventListener('change', () => toggleScoped(id));
+    else if (act === 'clear-scoped') el.addEventListener('click', clearScoped);
     else if (act === 'mode') el.addEventListener('click', () => setResultMode(el.dataset.mode));
     else if (act === 'pname') {
       el.addEventListener('input', () => setPlayerName(el.dataset.num, el.value));
