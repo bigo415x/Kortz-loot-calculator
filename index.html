@@ -787,7 +787,9 @@ function evaluatePlan(pool, playerCount, clusterAssign, hackerIdx, validRequests
 
     players.push({ num: i + 1, floorId, patch, isHacker: i === hackerIdx, lockedItems: locked, fillItems, value: own.value + top.value + lockedValue, pctUsed: own.pct + top.pct + lockedPct, spillPct });
   }
-  const bonusActive = fulfilledCount === MAX_BUYER_REQUESTS && validRequests.length === MAX_BUYER_REQUESTS;
+  // The bonus needs every request the run issued, however many that is - a run that hands out two
+  // pays for two. What matters is carrying the whole set, not hitting a fixed count.
+  const bonusActive = validRequests.length > 0 && fulfilledCount === validRequests.length;
   const totalValue = players.reduce((s, p) => s + p.value, 0) + (bonusActive ? BUYER_REQUEST_BONUS : 0);
   const totalSpillPct = players.reduce((s, p) => s + p.spillPct, 0);
   return { players, bonusActive, fulfilledCount, totalValue, totalSpillPct };
@@ -822,27 +824,34 @@ function solvePlans(pool, playerCount, forced, patchFirst) {
   return best;
 }
 
-// The bonus is all or nothing: two Buyer's Requests out of three pay exactly what none pay. So the
-// moment the full set can't land, chasing it is pure loss - it forces low-value items into bags and
-// bumps out better loot to buy a bonus that will never arrive. Whenever the set can't be completed,
-// the requests are dropped entirely and the plan goes for maximum cash, and the results say why.
+// The bonus is all or nothing across whatever set the run issued: carry every request and it pays,
+// carry all but one and it pays nothing. So the moment the set can't be completed, chasing it is
+// pure loss - it forces items into bags and bumps out better loot for a bonus that will never
+// arrive. The requests are then dropped entirely, and the results say which reason applied.
 //
-// Solo is where this bites hardest: anything scouted in the Crisp Gallery isn't in a solo pool at
-// all, so a request pinned there is unreachable before the search even starts.
+// The set is however many are ticked, not a fixed three. Runs issue two often enough that assuming
+// three left a perfectly winnable bonus on the table.
+//
+// Both plans are solved and compared on total, so the bonus is chased only when it more than covers
+// the loot it displaces. Ranking fulfilment above money outright would buy a $50k bonus with $60k
+// of bag space and call it a win.
 function computeCrewPlan(pool, playerCount, buyerRequestIds, patchFirst) {
   const reachable = buyerRequestIds.map(id => pool.find(it => it.id === id)).filter(Boolean);
   const unreachable = buyerRequestIds.length - reachable.length;
-  const fullSet = buyerRequestIds.length === MAX_BUYER_REQUESTS && unreachable === 0;
+  const plain = solvePlans(pool, playerCount, [], patchFirst);
+  const withReason = (plan, dropped, extra) => ({ ...plan, dropped, unreachable, selectedCount: buyerRequestIds.length, ...extra });
 
-  let best = solvePlans(pool, playerCount, fullSet ? reachable : [], patchFirst);
-  let dropped = null;
-  if (fullSet) {
-    // All three exist, but no arrangement of bags can carry them all.
-    if (best.fulfilledCount < MAX_BUYER_REQUESTS) { dropped = 'nofit'; best = solvePlans(pool, playerCount, [], patchFirst); }
-  } else if (buyerRequestIds.length) {
-    dropped = unreachable ? 'unreachable' : 'incomplete';
+  if (!buyerRequestIds.length) return withReason(plain, null);
+  // Solo bites hardest here: Crisp Gallery loot isn't in a solo pool at all, so a request pinned
+  // there is out of reach before the search even starts, and takes the whole bonus with it.
+  if (unreachable > 0) return withReason(plain, 'unreachable');
+
+  const chased = solvePlans(pool, playerCount, reachable, patchFirst);
+  if (chased.fulfilledCount < reachable.length) return withReason(plain, 'nofit');
+  if (chased.totalValue <= plain.totalValue) {
+    return withReason(plain, 'notworth', { forgone: plain.totalValue - chased.totalValue });
   }
-  return { ...best, dropped, unreachable, selectedCount: buyerRequestIds.length };
+  return withReason(chased, null);
 }
 
 /* ---------------- Mutations ---------------- */
@@ -1172,17 +1181,26 @@ function renderResultsTab(pool) {
       : `Every player takes the richest loot left anywhere in the building, so the bags are worth as much as they can be. Nobody is held to a floor, so expect crossing paths and backtracking${shortfall > 0 ? ` - the Fastest plan gives up $${fmtK(shortfall)}k to avoid it` : ''}.`
     } Crisp Gallery needs someone to hold the door: that player gets none of its loot, chosen automatically for the best total.</div>`;
   }
+  const nReq = payoutPlan.selectedCount;
   if (players && payoutPlan.dropped) {
+    const some = nReq === 1 ? 'it' : 'them';
     const why = {
-      unreachable: `${payoutPlan.unreachable} of them ${payoutPlan.unreachable === 1 ? 'is' : 'are'} in the Crisp Gallery, which needs 2+ players`,
-      incomplete: `only ${payoutPlan.selectedCount} of 3 ${payoutPlan.selectedCount === 1 ? 'is' : 'are'} selected`,
-      nofit: `all three are here, but no arrangement of bags carries them all`,
+      unreachable: `${payoutPlan.unreachable} of ${some} ${payoutPlan.unreachable === 1 ? 'is' : 'are'} in the Crisp Gallery, which needs 2+ players`,
+      nofit: `no arrangement of bags carries ${nReq === 1 ? 'it' : 'them all'}`,
+      notworth: `carrying ${nReq === 1 ? 'it' : 'them all'} would displace $${fmtK((payoutPlan.forgone || 0) + BUYER_REQUEST_BONUS)}k of loot to earn a $${fmtK(BUYER_REQUEST_BONUS)}k bonus`,
     }[payoutPlan.dropped];
-    html += `<div class="warn-box"><div class="warn-title">Buyer's Requests dropped</div>
-      <div class="warn-item"><div class="warn-line">The $50k bonus needs all three and ${esc(why)} — so it can't be earned.</div>
-      <div class="warn-foot">Two out of three pays the same as none, so the plan ignores them and goes for maximum cash instead.</div></div></div>`;
+    const headline = payoutPlan.dropped === 'notworth'
+      ? `The bonus isn't worth what it costs — ${why}.`
+      : `The $${fmtK(BUYER_REQUEST_BONUS)}k bonus needs all ${nReq === 1 ? 'of it' : nReq}, and ${why} — so it can't be earned.`;
+    html += `<div class="warn-box"><div class="warn-title">Buyer's Request${nReq === 1 ? '' : 's'} dropped</div>
+      <div class="warn-item"><div class="warn-line">${esc(headline)}</div>
+      <div class="warn-foot">${payoutPlan.dropped === 'notworth'
+        ? `The plan takes the richer loot instead. Tick fewer, or clear ${some}, if you want the bonus anyway.`
+        : `Short of the whole set the bonus pays nothing, so the plan ignores ${some} and goes for maximum cash instead.`}</div></div></div>`;
+  } else if (nReq) {
+    html += `<div class="hint">${nReq} Buyer's Request${nReq === 1 ? '' : 's'} selected (marked with * below) - the bonus needs the whole set, auto-fulfilled by whichever player has room</div>`;
   } else {
-    html += `<div class="hint">${state.buyerRequests.length}/3 Buyer's Requests selected (marked with * below) - auto-fulfilled by whichever player has room</div>`;
+    html += `<div class="hint">No Buyer's Requests selected - tick ★ on each item the buyer asked for, however many this run issued (up to ${MAX_BUYER_REQUESTS})</div>`;
   }
   html += `<div class="hint">Picks maximize cash, not item count or headline price - bag space is the real currency. Paintings look big but cost 50% of a bag, so they lose to smaller loot with a higher per-1% return (shown under each row).</div>`;
 
@@ -1235,7 +1253,7 @@ function renderResultsTab(pool) {
   });
 
   if (bonusActive) {
-    html += `<div class="bonus-box">All 3 Buyer's Requests fulfilled - +$50k bonus payout included below</div>`;
+    html += `<div class="bonus-box">${nReq === 1 ? 'The Buyer\'s Request is' : `All ${nReq} Buyer's Requests`} fulfilled - +$${fmtK(BUYER_REQUEST_BONUS)}k bonus payout included below</div>`;
   }
   html += `<div class="grand"><span class="grand-label">Total payout</span>
     <span class="grand-val">$${fmtK(totalValue)}k</span></div>`;
