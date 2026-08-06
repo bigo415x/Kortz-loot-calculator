@@ -95,6 +95,12 @@
   .mode.active .mode-name { color:var(--accent); font-weight:600; }
   .mode-val { font-size:17px; font-weight:600; font-variant-numeric:tabular-nums; }
   .mode-sub { font-size:9.5px; color:var(--muted2); text-align:center; }
+  .opt-row { display:flex; align-items:flex-start; gap:9px; background:var(--card); border-radius:8px;
+            padding:9px 10px; cursor:pointer; }
+  .opt-row input[type=checkbox] { flex:none; margin:1px 0 0; }
+  .opt-text { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .opt-name { font-size:12.5px; font-weight:500; }
+  .opt-sub { font-size:10.5px; line-height:1.35; color:var(--muted2); }
   .warn-box { background:#3a2f1c; border:1px solid #7a6224; border-radius:8px; padding:9px 11px;
               display:flex; flex-direction:column; gap:3px; }
   .warn-title { font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#f0c860; }
@@ -459,6 +465,7 @@ function encodePlan() {
       + Math.round((val - 5000) / 500).toString(36)),
     b: state.buyerRequests.map(id => ids.indexOf(id)).filter(i => i >= 0),
     p: state.playerNames || {},
+    e: state.eliteChallenge ? 1 : 0,
   }));
 }
 
@@ -497,6 +504,7 @@ function decodePlan(encoded) {
   state.depositBoxes = deposits;
   state.playerCount = Math.min(4, Math.max(1, parseInt(o.n, 10) || 1));
   state.resultMode = o.m === 'f' ? 'fastest' : 'payout';
+  state.eliteChallenge = o.e === 1;
   state.buyerRequests = (Array.isArray(o.b) ? o.b : [])
     .map(i => (placements[i] || {}).id).filter(Boolean).slice(0, MAX_BUYER_REQUESTS);
   state.playerNames = (o.p && typeof o.p === 'object') ? o.p : {};
@@ -549,6 +557,7 @@ const state = {
   pickedUp: {},       // itemId -> bool - mid-run progress tracker, does not affect the math
   scoped: {},         // placementId -> bool - scouting checklist, does not affect the math
   resultMode: 'payout', // 'payout' = richest bags anywhere | 'fastest' = stay in your own area
+  eliteChallenge: false, // carry every Buyer's Request even when the bonus doesn't cover the cost
   playerNames: {},    // player number -> gamertag, blank falls back to "Player N"
 };
 
@@ -835,7 +844,12 @@ function solvePlans(pool, playerCount, forced, patchFirst) {
 // Both plans are solved and compared on total, so the bonus is chased only when it more than covers
 // the loot it displaces. Ranking fulfilment above money outright would buy a $50k bonus with $60k
 // of bag space and call it a win.
-function computeCrewPlan(pool, playerCount, buyerRequestIds, patchFirst) {
+//
+// Unless `forceRequests` is on - the Elite Challenge. Then carrying the set is the objective and the
+// money argument doesn't apply: the requested items go in the bags whatever they cost, and the cost
+// is reported rather than used to overrule the choice. Physical impossibility still overrules it;
+// no setting can carry loot that isn't reachable or won't fit.
+function computeCrewPlan(pool, playerCount, buyerRequestIds, patchFirst, forceRequests) {
   const reachable = buyerRequestIds.map(id => pool.find(it => it.id === id)).filter(Boolean);
   const unreachable = buyerRequestIds.length - reachable.length;
   const plain = solvePlans(pool, playerCount, [], patchFirst);
@@ -848,15 +862,16 @@ function computeCrewPlan(pool, playerCount, buyerRequestIds, patchFirst) {
 
   const chased = solvePlans(pool, playerCount, reachable, patchFirst);
   if (chased.fulfilledCount < reachable.length) return withReason(plain, 'nofit');
-  if (chased.totalValue <= plain.totalValue) {
-    return withReason(plain, 'notworth', { forgone: plain.totalValue - chased.totalValue });
-  }
-  return withReason(chased, null);
+
+  const cost = plain.totalValue - chased.totalValue;
+  if (cost > 0 && !forceRequests) return withReason(plain, 'notworth', { forgone: cost });
+  return withReason(chased, null, cost > 0 ? { forcedCost: cost } : {});
 }
 
 /* ---------------- Mutations ---------------- */
 function setTab(t) { state.tab = t; saveState(); render(); }
 function setResultMode(m) { state.resultMode = m; saveState(); render(); }
+function setEliteChallenge(on) { state.eliteChallenge = on; saveState(); render(); }
 // No re-render: the name is a label, and redrawing mid-word would take the keyboard away.
 function setPlayerName(num, name) { state.playerNames[num] = name; saveState(); }
 function setPlayerCount(n) { state.playerCount = n; saveState(); render(); }
@@ -1145,8 +1160,9 @@ function renderResultsTab(pool) {
   const crew = state.playerCount > 1;
   // Both plans are always solved - the totals are the whole point of the choice, so each mode's
   // number sits on its own button and you can see what the shorter walk costs before taking it.
-  const payoutPlan = computeCrewPlan(pool, state.playerCount, state.buyerRequests, false);
-  const fastestPlan = crew ? computeCrewPlan(pool, state.playerCount, state.buyerRequests, true) : payoutPlan;
+  const elite = !!state.eliteChallenge;
+  const payoutPlan = computeCrewPlan(pool, state.playerCount, state.buyerRequests, false, elite);
+  const fastestPlan = crew ? computeCrewPlan(pool, state.playerCount, state.buyerRequests, true, elite) : payoutPlan;
   const mode = state.resultMode === 'fastest' ? 'fastest' : 'payout';
   const { players, bonusActive, totalValue } = mode === 'fastest' ? fastestPlan : payoutPlan;
   let html = '';
@@ -1195,12 +1211,24 @@ function renderResultsTab(pool) {
     html += `<div class="warn-box"><div class="warn-title">Buyer's Request${nReq === 1 ? '' : 's'} dropped</div>
       <div class="warn-item"><div class="warn-line">${esc(headline)}</div>
       <div class="warn-foot">${payoutPlan.dropped === 'notworth'
-        ? `The plan takes the richer loot instead. Tick fewer, or clear ${some}, if you want the bonus anyway.`
-        : `Short of the whole set the bonus pays nothing, so the plan ignores ${some} and goes for maximum cash instead.`}</div></div></div>`;
+        ? `The plan takes the richer loot instead. Turn on Elite Challenge below to carry ${some} anyway.`
+        : (elite
+            ? `No setting can carry loot that isn't there, so the Elite Challenge can't be completed this run. The plan goes for maximum cash instead.`
+            : `Short of the whole set the bonus pays nothing, so the plan ignores ${some} and goes for maximum cash instead.`)}</div></div></div>`;
   } else if (nReq) {
-    html += `<div class="hint">${nReq} Buyer's Request${nReq === 1 ? '' : 's'} selected (marked with * below) - the bonus needs the whole set, auto-fulfilled by whichever player has room</div>`;
+    const cost = payoutPlan.forcedCost || 0;
+    html += `<div class="hint">${nReq} Buyer's Request${nReq === 1 ? '' : 's'} selected (marked with * below) - ${cost > 0
+      ? `carried because Elite Challenge is on, at $${fmtK(cost)}k against the best-value plan`
+      : `the bonus needs the whole set, auto-fulfilled by whichever player has room`}</div>`;
   } else {
     html += `<div class="hint">No Buyer's Requests selected - tick ★ on each item the buyer asked for, however many this run issued (up to ${MAX_BUYER_REQUESTS})</div>`;
+  }
+
+  // Only meaningful once something is requested, so it stays out of the way until then.
+  if (nReq) {
+    html += `<label class="opt-row"><input type="checkbox" data-act="elite" ${elite ? 'checked' : ''}/>
+      <span class="opt-text"><span class="opt-name">Elite Challenge</span>
+      <span class="opt-sub">Carry every Buyer's Request even when the bonus doesn't cover what it displaces. Off, the plan drops a set that costs more than it pays.</span></span></label>`;
   }
   html += `<div class="hint">Picks maximize cash, not item count or headline price - bag space is the real currency. Paintings look big but cost 50% of a bag, so they lose to smaller loot with a higher per-1% return (shown under each row).</div>`;
 
@@ -1326,6 +1354,7 @@ function attachListeners() {
     else if (act === 'scoped') el.addEventListener('change', () => toggleScoped(id));
     else if (act === 'clear-scoped') el.addEventListener('click', clearScoped);
     else if (act === 'mode') el.addEventListener('click', () => setResultMode(el.dataset.mode));
+    else if (act === 'elite') el.addEventListener('change', e => setEliteChallenge(e.target.checked));
     else if (act === 'pname') {
       el.addEventListener('input', () => setPlayerName(el.dataset.num, el.value));
       el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
